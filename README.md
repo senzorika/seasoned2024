@@ -30,20 +30,12 @@ Users select a sample and indicate the dominant sensation they perceive at vario
 3. AEF (Attack-Evolution-Finish)
 AEF tracks the evolution of specific attributes over time, allowing users to percept and write down attributes change in throughout the evaluation period.
 
-Features
-Sample Selection: Choose from multiple samples.
-Attribute Intensity Recording: Record the intensity of attributes at different time points.
-Save Data: Save and export recorded data.
-Data Visualization: Generate and view evolution curves showing how attribute intensities change over time.
-How It Works
-Users select a sample and record the intensity of various attributes at specified time points. The app visualizes these intensities over time, providing insights into how attributes evolve during the evaluation.
-
 Installation
 To run these applications locally, you need to have R and the following packages installed:
 install.packages(c("shiny", "shinydashboard", "ggplot2", "openxlsx", "dplyr", "tidyr", "ca"))
 Usage
 Clone the repository:
-git clone https://github.com/yourusername/sensory-evaluation-tools.git
+git clone https://github.com/senzorika/seasoned2024/sensory-evaluation-tools.git
 cd sensory-evaluation-tools
 Open the respective app.R file in RStudio or your preferred R environment.
 
