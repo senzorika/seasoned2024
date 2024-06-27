@@ -1,4 +1,4 @@
-# SESONED Sensory summer school, SDU Odense, Denmark
+# SEASONED Sensory summer school, SDU Odense, Denmark
 # Vladimir Vietoris, 2024
 library(shiny)
 library(shinyjs)
