@@ -12,10 +12,10 @@ st.set_page_config(
     layout="wide"
 )
 
-# Globálne cache pre zdieľanie dát medzi sessions
+# Jednoduchší globálny stav pomocou st.cache_data
 @st.cache_data
-def get_global_state():
-    """Získa globálny stav aplikácie"""
+def init_global_state():
+    """Inicializuje globálny stav"""
     return {
         'session_active': False,
         'samples_count': 0,
@@ -24,26 +24,17 @@ def get_global_state():
         'session_id': str(uuid.uuid4())[:8]
     }
 
-@st.cache_data
-def update_global_state(new_state):
-    """Aktualizuje globálny stav aplikácie"""
-    return new_state
-
 def get_current_state():
-    """Získa aktuálny stav - buď z cache alebo vytvorí nový"""
-    try:
-        return st.session_state.global_state
-    except:
-        st.session_state.global_state = get_global_state()
-        return st.session_state.global_state
+    """Získa aktuálny stav"""
+    if 'global_state' not in st.session_state:
+        st.session_state.global_state = init_global_state()
+    return st.session_state.global_state
 
-def save_global_state(state):
-    """Uloží stav globálne"""
-    st.session_state.global_state = state
-    # Clear cache a nastaviť nový
-    get_global_state.clear()
-    update_global_state.clear()
-    update_global_state(state)
+def update_global_state(new_state):
+    """Aktualizuje globálny stav"""
+    st.session_state.global_state = new_state
+    # Vyčistenie cache aby sa načítal nový stav
+    init_global_state.clear()
 
 # Inicializácia session state pre admin mode
 if 'admin_mode' not in st.session_state:
@@ -53,6 +44,18 @@ if 'admin_authenticated' not in st.session_state:
 
 # Admin heslo
 ADMIN_PASSWORD = "consumertest24"
+
+def get_query_params():
+    """Získa URL parametre kompatibilne s rôznymi verziami Streamlit"""
+    try:
+        # Nová verzia Streamlit
+        return st.query_params
+    except:
+        try:
+            # Stará verzia Streamlit
+            return st.experimental_get_query_params()
+        except:
+            return {}
 
 def admin_login():
     """Login formulár pre admin"""
@@ -141,7 +144,7 @@ def admin_interface():
                     new_state['samples_count'] = samples_count
                     new_state['samples_names'] = sample_names
                     new_state['session_active'] = True
-                    save_global_state(new_state)
+                    update_global_state(new_state)
                     st.success("✅ Nastavenia uložené!")
                     st.rerun()
             
@@ -149,7 +152,7 @@ def admin_interface():
                 if st.button("🔄 Reset hodnotení"):
                     new_state = current_state.copy()
                     new_state['evaluations'] = []
-                    save_global_state(new_state)
+                    update_global_state(new_state)
                     st.success("✅ Hodnotenia resetované!")
                     st.rerun()
             
@@ -162,9 +165,9 @@ def admin_interface():
             if current_state['session_active']:
                 st.subheader("📱 QR kód pre hodnotiteľov")
                 
-                # URL aplikácie na Streamlit Cloud
+                # Fixná URL aplikácie na Streamlit Cloud
                 app_url = "https://consumervote.streamlit.app"
-                evaluator_url = f"{app_url}?mode=evaluator&hide_sidebar=true"
+                evaluator_url = f"{app_url}/?mode=evaluator&hide_sidebar=true"
                 
                 # Generovanie a zobrazenie QR kódu
                 qr_image_url = generate_qr_code_url(evaluator_url)
@@ -438,7 +441,7 @@ def evaluator_interface():
                 # Aktualizácia globálneho stavu
                 new_state = current_state.copy()
                 new_state['evaluations'].append(evaluation)
-                save_global_state(new_state)
+                update_global_state(new_state)
                 
                 # Nastavenie príznaku úspešného odoslania
                 st.session_state.evaluation_submitted = True
@@ -458,12 +461,29 @@ def evaluator_interface():
 def main():
     """Hlavná funkcia aplikácie"""
     
-    # Kontrola URL parametrov
-    query_params = st.query_params
-    hide_sidebar = 'hide_sidebar' in query_params and query_params['hide_sidebar'] == 'true'
+    # Kontrola URL parametrov s kompatibilitou
+    query_params = get_query_params()
     
-    if 'mode' in query_params and query_params['mode'] == 'evaluator':
-        st.session_state.admin_mode = False
+    # Spracovanie parametrov pre rôzne formáty
+    hide_sidebar = False
+    if 'hide_sidebar' in query_params:
+        hide_sidebar_value = query_params['hide_sidebar']
+        if isinstance(hide_sidebar_value, list):
+            hide_sidebar = hide_sidebar_value[0] == 'true'
+        else:
+            hide_sidebar = hide_sidebar_value == 'true'
+    
+    # Nastavenie evaluator mode ak je v URL
+    if 'mode' in query_params:
+        mode_value = query_params['mode']
+        if isinstance(mode_value, list):
+            mode_value = mode_value[0]
+        if mode_value == 'evaluator':
+            st.session_state.admin_mode = False
+    
+    # Debug info pre testovanie
+    if query_params:
+        st.sidebar.write("🔍 Debug URL params:", query_params)
     
     # Získanie aktuálneho stavu
     current_state = get_current_state()
@@ -471,6 +491,14 @@ def main():
     # Ak je sidebar skrytý, force evaluator mode a nie je možné prepnúť
     if hide_sidebar:
         st.session_state.admin_mode = False
+        # Skryť sidebar CSS
+        st.markdown("""
+        <style>
+        .css-1d391kg {display: none}
+        .css-1rs6os {display: none}
+        .css-17eq0hr {display: none}
+        </style>
+        """, unsafe_allow_html=True)
         evaluator_interface()
         return
     
