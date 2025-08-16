@@ -90,17 +90,9 @@ def admin_interface():
             if st.session_state.session_active:
                 st.subheader("📱 QR kód pre hodnotiteľov")
                 
-                # Generovanie URL pre hodnotiteľov (bez admin konzoly)
-                base_url = st.get_option("browser.serverAddress") or "localhost"
-                port = st.get_option("server.port") or 8501
-                
-                # Pre lokálne testovanie
-                if base_url == "localhost":
-                    current_url = f"http://localhost:{port}"
-                else:
-                    current_url = f"https://{base_url}"
-                
-                evaluator_url = f"{current_url}?mode=evaluator&hide_sidebar=true"
+                # URL aplikácie na Streamlit Cloud
+                app_url = "https://consumervote.streamlit.app"
+                evaluator_url = f"{app_url}?mode=evaluator&hide_sidebar=true"
                 
                 # Generovanie a zobrazenie QR kódu
                 qr_image_url = generate_qr_code_url(evaluator_url)
