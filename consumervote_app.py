@@ -167,29 +167,73 @@ def admin_interface():
         st.divider()
         st.subheader("📈 Výsledky hodnotenia")
         
-        # Konverzia na DataFrame
-        df = pd.DataFrame(current_state['evaluations'])
+        # Konverzia na DataFrame s popisnými hodnotami
+        df_raw = pd.DataFrame(current_state['evaluations'])
+        df_display = df_raw.copy()
+        
+        # Nahradenie číselných hodnôt popisnými pre lepšie zobrazenie
+        for col in df_display.columns:
+            if col.startswith('poradie_'):
+                df_display[col] = df_display[col].replace({
+                    1: '🥇 1. miesto',
+                    2: '🥈 2. miesto', 
+                    3: '🥉 3. miesto',
+                    999: '❌ Neklasifikované'
+                })
         
         # Základné štatistiky
         st.write("**Prehľad hodnotení:**")
-        st.dataframe(df)
+        st.dataframe(df_display, use_container_width=True)
+        
+        # Súhrn výsledkov
+        st.subheader("🏆 Súhrn výsledkov")
+        
+        # Analýza pre každú vzorku
+        summary_data = []
+        for sample_name in current_state['samples_names']:
+            col_name = f'poradie_{sample_name}'
+            if col_name in df_raw.columns:
+                rankings = df_raw[col_name].tolist()
+                first_places = rankings.count(1)
+                second_places = rankings.count(2)
+                third_places = rankings.count(3)
+                unranked = rankings.count(999)
+                
+                summary_data.append({
+                    'Vzorka': sample_name,
+                    '🥇 1. miesta': first_places,
+                    '🥈 2. miesta': second_places,
+                    '🥉 3. miesta': third_places,
+                    '❌ Neklasifikované': unranked
+                })
+        
+        summary_df = pd.DataFrame(summary_data)
+        st.dataframe(summary_df, use_container_width=True)
         
         # Export
-        if st.button("📥 Exportovať výsledky (CSV)"):
-            csv = df.to_csv(index=False)
-            st.download_button(
-                label="Stiahnuť CSV",
-                data=csv,
-                file_name=f"hodnotenia_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv",
-                mime="text/csv"
-            )
+        col1, col2 = st.columns(2)
+        with col1:
+            if st.button("📥 Exportovať podrobné výsledky (CSV)"):
+                csv = df_raw.to_csv(index=False)
+                st.download_button(
+                    label="Stiahnuť podrobné CSV",
+                    data=csv,
+                    file_name=f"hodnotenia_podrobne_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv",
+                    mime="text/csv"
+                )
+        
+        with col2:
+            if st.button("📊 Exportovať súhrn (CSV)"):
+                csv_summary = summary_df.to_csv(index=False)
+                st.download_button(
+                    label="Stiahnuť súhrn CSV",
+                    data=csv_summary,
+                    file_name=f"hodnotenia_suhrn_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv",
+                    mime="text/csv"
+                )
 
 def evaluator_interface():
     """Rozhranie pre hodnotiteľov"""
-    
-    # Skontrolovať či sa má skryť sidebar
-    query_params = st.query_params
-    hide_sidebar = 'hide_sidebar' in query_params and query_params['hide_sidebar'] == 'true'
     
     # Získanie aktuálneho stavu
     current_state = get_current_state()
@@ -198,80 +242,204 @@ def evaluator_interface():
     
     if not current_state['session_active']:
         st.error("❌ Hodnotenie nie je aktívne. Kontaktujte administrátora.")
-        if not hide_sidebar:
-            if st.button("🔧 Prejsť na admin panel"):
-                st.session_state.admin_mode = True
-                st.rerun()
         return
     
-    st.write("Usporiadajte vzorky podľa vašich preferencií (1 = najlepšia, 2 = druhá najlepšia, atď.)")
+    st.write("**Vyberte TOP 3 vzorky v poradí od najlepšej po tretiu najlepšiu**")
+    st.info("💡 Vyberte len 3 najlepšie vzorky - zostatok bude automaticky označený ako neklasifikovaný")
     
-    with st.form("evaluation_form"):
-        st.subheader("📝 Hodnotenie")
-        
-        # Informácie o hodnotiteľovi
-        evaluator_name = st.text_input("Meno hodnotiteľa:", placeholder="Zadajte vaše meno")
-        
-        # Hodnotenie vzoriek
-        rankings = {}
-        
-        for i, sample_name in enumerate(current_state['samples_names']):
-            ranking = st.selectbox(
-                f"Poradie pre {sample_name}:",
-                options=list(range(1, current_state['samples_count'] + 1)),
-                key=f"ranking_{i}"
-            )
-            rankings[sample_name] = ranking
-        
-        # Voliteľný komentár
-        comment = st.text_area("Komentár (voliteľný):", placeholder="Váš komentár k hodnoteniu...")
-        
-        # Tlačidlo na odoslanie
-        submitted = st.form_submit_button("📤 Odoslať hodnotenie", type="primary")
-        
-        if submitted:
-            if not evaluator_name.strip():
-                st.error("❌ Prosím zadajte vaše meno!")
-            else:
-                # Kontrola, že každé poradie je jedinečné
-                ranking_values = list(rankings.values())
-                if len(set(ranking_values)) != len(ranking_values):
-                    st.error("❌ Každá vzorka musí mať jedinečné poradie!")
-                else:
-                    # Uloženie hodnotenia
-                    evaluation = {
-                        'hodnotiteľ': evaluator_name,
-                        'čas': datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
-                        'komentár': comment,
-                        'id': str(uuid.uuid4())[:8]
-                    }
-                    
-                    # Pridanie hodnotení pre jednotlivé vzorky
-                    for sample_name, ranking in rankings.items():
-                        evaluation[f'poradie_{sample_name}'] = ranking
-                    
-                    # Aktualizácia globálneho stavu
-                    new_state = current_state.copy()
-                    new_state['evaluations'].append(evaluation)
-                    save_global_state(new_state)
-                    
-                    st.success("✅ Hodnotenie bolo úspešne odoslané!")
-                    st.balloons()
-                    
-                    # Zobrazenie súhrnu
-                    st.subheader("📋 Vaše hodnotenie:")
-                    for sample_name, ranking in rankings.items():
-                        st.write(f"**{sample_name}**: {ranking}. miesto")
-                    
-                    if comment:
-                        st.write(f"**Komentár**: {comment}")
+    # CSS pre popup styling
+    st.markdown("""
+    <style>
+    .sample-button {
+        display: inline-block;
+        padding: 1rem;
+        margin: 0.5rem;
+        background-color: #f0f2f6;
+        border: 2px solid #ddd;
+        border-radius: 10px;
+        text-align: center;
+        cursor: pointer;
+        transition: all 0.3s;
+        min-width: 150px;
+    }
+    .sample-button:hover {
+        background-color: #e1e5eb;
+        border-color: #ff4b4b;
+    }
+    .selected-1 {
+        background-color: #ffd700 !important;
+        border-color: #ffb000 !important;
+        color: #000;
+    }
+    .selected-2 {
+        background-color: #c0c0c0 !important;
+        border-color: #a0a0a0 !important;
+        color: #000;
+    }
+    .selected-3 {
+        background-color: #cd7f32 !important;
+        border-color: #b8722c !important;
+        color: #fff;
+    }
+    </style>
+    """, unsafe_allow_html=True)
     
-    # Tlačidlo pre admin len ak nie je skrytý sidebar
-    if not hide_sidebar:
+    # Inicializácia stavu pre výber
+    if 'selected_samples' not in st.session_state:
+        st.session_state.selected_samples = {'1': None, '2': None, '3': None}
+    if 'evaluator_name' not in st.session_state:
+        st.session_state.evaluator_name = ''
+    if 'evaluator_comment' not in st.session_state:
+        st.session_state.evaluator_comment = ''
+    
+    # Formulár pre meno hodnotiteľa
+    with st.container():
+        st.subheader("👤 Informácie o hodnotiteľovi")
+        evaluator_name = st.text_input(
+            "Meno hodnotiteľa:", 
+            value=st.session_state.evaluator_name,
+            placeholder="Zadajte vaše meno",
+            key="eval_name_input"
+        )
+        st.session_state.evaluator_name = evaluator_name
+    
+    # Výber TOP 3 vzoriek
+    st.subheader("🏆 Vyberte TOP 3 vzorky")
+    
+    col1, col2, col3 = st.columns(3)
+    
+    with col1:
+        st.markdown("### 🥇 1. miesto")
+        first_place = st.selectbox(
+            "Najlepšia vzorka:",
+            options=[''] + current_state['samples_names'],
+            index=0 if st.session_state.selected_samples['1'] is None else current_state['samples_names'].index(st.session_state.selected_samples['1']) + 1,
+            key="first_place_select"
+        )
+        if first_place:
+            st.session_state.selected_samples['1'] = first_place
+        else:
+            st.session_state.selected_samples['1'] = None
+    
+    with col2:
+        st.markdown("### 🥈 2. miesto")
+        available_for_second = [s for s in current_state['samples_names'] if s != st.session_state.selected_samples['1']]
+        second_place = st.selectbox(
+            "Druhá najlepšia vzorka:",
+            options=[''] + available_for_second,
+            index=0 if st.session_state.selected_samples['2'] is None or st.session_state.selected_samples['2'] not in available_for_second 
+            else available_for_second.index(st.session_state.selected_samples['2']) + 1,
+            key="second_place_select"
+        )
+        if second_place:
+            st.session_state.selected_samples['2'] = second_place
+        else:
+            st.session_state.selected_samples['2'] = None
+    
+    with col3:
+        st.markdown("### 🥉 3. miesto")
+        available_for_third = [s for s in current_state['samples_names'] 
+                              if s != st.session_state.selected_samples['1'] and s != st.session_state.selected_samples['2']]
+        third_place = st.selectbox(
+            "Tretia najlepšia vzorka:",
+            options=[''] + available_for_third,
+            index=0 if st.session_state.selected_samples['3'] is None or st.session_state.selected_samples['3'] not in available_for_third
+            else available_for_third.index(st.session_state.selected_samples['3']) + 1,
+            key="third_place_select"
+        )
+        if third_place:
+            st.session_state.selected_samples['3'] = third_place
+        else:
+            st.session_state.selected_samples['3'] = None
+    
+    # Zobrazenie súhrnu výberu
+    if any(st.session_state.selected_samples.values()):
         st.divider()
-        if st.button("🔧 Admin panel"):
-            st.session_state.admin_mode = True
-            st.rerun()
+        st.subheader("📋 Vaš výber:")
+        
+        for place, sample in st.session_state.selected_samples.items():
+            if sample:
+                medal = "🥇" if place == "1" else "🥈" if place == "2" else "🥉"
+                st.write(f"{medal} **{place}. miesto**: {sample}")
+        
+        # Zostávajúce vzorky
+        remaining = [s for s in current_state['samples_names'] 
+                    if s not in st.session_state.selected_samples.values()]
+        if remaining:
+            st.write(f"📝 **Neklasifikované vzorky**: {', '.join(remaining)}")
+    
+    # Komentár
+    st.divider()
+    comment = st.text_area(
+        "💬 Komentár (voliteľný):", 
+        value=st.session_state.evaluator_comment,
+        placeholder="Váš komentár k hodnoteniu...",
+        key="eval_comment_input"
+    )
+    st.session_state.evaluator_comment = comment
+    
+    # Modal dialog pre potvrdenie
+    if st.button("📤 Odoslať hodnotenie", type="primary", use_container_width=True):
+        # Validácia
+        if not evaluator_name.strip():
+            st.error("❌ Prosím zadajte vaše meno!")
+        elif not any(st.session_state.selected_samples.values()):
+            st.error("❌ Prosím vyberte aspoň jednu vzorku!")
+        else:
+            # Modal pre potvrdenie
+            with st.container():
+                st.markdown("---")
+                st.markdown("### ✅ Potvrdenie hodnotenia")
+                st.write(f"**Hodnotiteľ**: {evaluator_name}")
+                
+                for place, sample in st.session_state.selected_samples.items():
+                    if sample:
+                        medal = "🥇" if place == "1" else "🥈" if place == "2" else "🥉"
+                        st.write(f"{medal} **{place}. miesto**: {sample}")
+                
+                if comment:
+                    st.write(f"**Komentár**: {comment}")
+                
+                col1, col2 = st.columns(2)
+                
+                with col1:
+                    if st.button("✅ Potvrdiť a odoslať", type="primary", use_container_width=True):
+                        # Uloženie hodnotenia
+                        evaluation = {
+                            'hodnotiteľ': evaluator_name,
+                            'čas': datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
+                            'komentár': comment,
+                            'id': str(uuid.uuid4())[:8]
+                        }
+                        
+                        # Pridanie hodnotení pre všetky vzorky
+                        for sample_name in current_state['samples_names']:
+                            if sample_name == st.session_state.selected_samples['1']:
+                                evaluation[f'poradie_{sample_name}'] = 1
+                            elif sample_name == st.session_state.selected_samples['2']:
+                                evaluation[f'poradie_{sample_name}'] = 2
+                            elif sample_name == st.session_state.selected_samples['3']:
+                                evaluation[f'poradie_{sample_name}'] = 3
+                            else:
+                                evaluation[f'poradie_{sample_name}'] = 999  # Neklasifikované
+                        
+                        # Aktualizácia globálneho stavu
+                        new_state = current_state.copy()
+                        new_state['evaluations'].append(evaluation)
+                        save_global_state(new_state)
+                        
+                        # Reset formulára
+                        st.session_state.selected_samples = {'1': None, '2': None, '3': None}
+                        st.session_state.evaluator_name = ''
+                        st.session_state.evaluator_comment = ''
+                        
+                        st.success("✅ Hodnotenie bolo úspešne odoslané!")
+                        st.balloons()
+                        st.rerun()
+                
+                with col2:
+                    if st.button("❌ Zrušiť", use_container_width=True):
+                        st.rerun()
 
 def main():
     """Hlavná funkcia aplikácie"""
@@ -286,34 +454,35 @@ def main():
     # Získanie aktuálneho stavu
     current_state = get_current_state()
     
-    # Sidebar pre navigáciu (len ak nie je skrytý)
-    if not hide_sidebar:
-        with st.sidebar:
-            st.title("🧪 Hodnotenie vzoriek")
-            
-            mode = st.radio(
-                "Vyberte režim:",
-                ["👥 Hodnotiteľ", "🔧 Administrátor"],
-                index=1 if st.session_state.admin_mode else 0
-            )
-            
-            st.session_state.admin_mode = (mode == "🔧 Administrátor")
-            
-            st.divider()
-            
-            # Informácie o aplikácii
-            st.subheader("ℹ️ O aplikácii")
-            st.write("Aplikácia na hodnotenie vzoriek v poradí.")
-            
-            if current_state['session_active']:
-                st.success(f"✅ Aktívne hodnotenie\n{current_state['samples_count']} vzoriek")
-                st.success(f"📊 {len(current_state['evaluations'])} hodnotení")
-            else:
-                st.warning("⚠️ Hodnotenie nie je nastavené")
-    
-    # Ak je sidebar skrytý, force evaluator mode
+    # Ak je sidebar skrytý, force evaluator mode a nie je možné prepnúť
     if hide_sidebar:
         st.session_state.admin_mode = False
+        evaluator_interface()
+        return
+    
+    # Sidebar pre navigáciu (len pre admin)
+    with st.sidebar:
+        st.title("🧪 Hodnotenie vzoriek")
+        
+        mode = st.radio(
+            "Vyberte režim:",
+            ["👥 Hodnotiteľ", "🔧 Administrátor"],
+            index=1 if st.session_state.admin_mode else 0
+        )
+        
+        st.session_state.admin_mode = (mode == "🔧 Administrátor")
+        
+        st.divider()
+        
+        # Informácie o aplikácii
+        st.subheader("ℹ️ O aplikácii")
+        st.write("Aplikácia na hodnotenie vzoriek v poradí.")
+        
+        if current_state['session_active']:
+            st.success(f"✅ Aktívne hodnotenie\n{current_state['samples_count']} vzoriek")
+            st.success(f"📊 {len(current_state['evaluations'])} hodnotení")
+        else:
+            st.warning("⚠️ Hodnotenie nie je nastavené")
     
     # Zobrazenie príslušného rozhrania
     if st.session_state.admin_mode:
