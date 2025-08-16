@@ -4,6 +4,8 @@ import json
 from datetime import datetime
 import uuid
 import urllib.parse
+import tempfile
+import os
 
 # Nastavenie stránky
 st.set_page_config(
@@ -12,29 +14,48 @@ st.set_page_config(
     layout="wide"
 )
 
-# Jednoduchší globálny stav pomocou st.cache_data
-@st.cache_data
-def init_global_state():
-    """Inicializuje globálny stav"""
-    return {
+# Jednoduchšie riešenie pre zdieľanie dát
+import tempfile
+import os
+
+# Globálny súbor pre zdieľanie dát
+GLOBAL_DATA_FILE = os.path.join(tempfile.gettempdir(), "consumervote_data.json")
+
+def get_current_state():
+    """Získa aktuálny stav z súboru alebo vytvorí nový"""
+    default_state = {
         'session_active': False,
         'samples_count': 0,
         'samples_names': [],
         'evaluations': [],
         'session_id': str(uuid.uuid4())[:8]
     }
+    
+    try:
+        # Pokus o načítanie zo súboru
+        if os.path.exists(GLOBAL_DATA_FILE):
+            with open(GLOBAL_DATA_FILE, 'r', encoding='utf-8') as f:
+                return json.load(f)
+    except:
+        pass
+    
+    return default_state
 
-def get_current_state():
-    """Získa aktuálny stav"""
-    if 'global_state' not in st.session_state:
-        st.session_state.global_state = init_global_state()
-    return st.session_state.global_state
-
-def update_global_state(new_state):
-    """Aktualizuje globálny stav"""
-    st.session_state.global_state = new_state
-    # Vyčistenie cache aby sa načítal nový stav
-    init_global_state.clear()
+def save_global_state(state):
+    """Uloží stav do súboru"""
+    try:
+        with open(GLOBAL_DATA_FILE, 'w', encoding='utf-8') as f:
+            json.dump(state, f, ensure_ascii=False, indent=2)
+    except Exception as e:
+        st.error(f"Chyba pri ukladaní: {e}")
+        
+def clear_global_cache():
+    """Vyčistí globálny súbor"""
+    try:
+        if os.path.exists(GLOBAL_DATA_FILE):
+            os.remove(GLOBAL_DATA_FILE)
+    except:
+        pass
 
 # Inicializácia session state pre admin mode
 if 'admin_mode' not in st.session_state:
@@ -44,18 +65,6 @@ if 'admin_authenticated' not in st.session_state:
 
 # Admin heslo
 ADMIN_PASSWORD = "consumertest24"
-
-def get_query_params():
-    """Získa URL parametre kompatibilne s rôznymi verziami Streamlit"""
-    try:
-        # Nová verzia Streamlit
-        return st.query_params
-    except:
-        try:
-            # Stará verzia Streamlit
-            return st.experimental_get_query_params()
-        except:
-            return {}
 
 def admin_login():
     """Login formulár pre admin"""
@@ -144,7 +153,7 @@ def admin_interface():
                     new_state['samples_count'] = samples_count
                     new_state['samples_names'] = sample_names
                     new_state['session_active'] = True
-                    update_global_state(new_state)
+                    save_global_state(new_state)
                     st.success("✅ Nastavenia uložené!")
                     st.rerun()
             
@@ -152,7 +161,7 @@ def admin_interface():
                 if st.button("🔄 Reset hodnotení"):
                     new_state = current_state.copy()
                     new_state['evaluations'] = []
-                    update_global_state(new_state)
+                    save_global_state(new_state)
                     st.success("✅ Hodnotenia resetované!")
                     st.rerun()
             
@@ -165,9 +174,9 @@ def admin_interface():
             if current_state['session_active']:
                 st.subheader("📱 QR kód pre hodnotiteľov")
                 
-                # Fixná URL aplikácie na Streamlit Cloud
+                # URL aplikácie na Streamlit Cloud
                 app_url = "https://consumervote.streamlit.app"
-                evaluator_url = f"{app_url}/?mode=evaluator&hide_sidebar=true"
+                evaluator_url = f"{app_url}?mode=evaluator&hide_sidebar=true"
                 
                 # Generovanie a zobrazenie QR kódu
                 qr_image_url = generate_qr_code_url(evaluator_url)
@@ -281,10 +290,15 @@ def evaluator_interface():
     # Získanie aktuálneho stavu
     current_state = get_current_state()
     
+    # Debug informácie (odkomentuj pre testovanie)
+    # st.write(f"Debug - Current state active: {current_state['session_active']}")
+    # st.write(f"Debug - Samples count: {current_state['samples_count']}")
+    
     st.title("🧪 Hodnotenie vzoriek")
     
     if not current_state['session_active']:
         st.error("❌ Hodnotenie nie je aktívne. Kontaktujte administrátora.")
+        st.info("💡 Admin musí najskôr nastaviť vzorky v admin paneli.")
         return
     
     st.write("**Vyberte TOP 3 vzorky v poradí od najlepšej po tretiu najlepšiu**")
@@ -441,7 +455,7 @@ def evaluator_interface():
                 # Aktualizácia globálneho stavu
                 new_state = current_state.copy()
                 new_state['evaluations'].append(evaluation)
-                update_global_state(new_state)
+                save_global_state(new_state)
                 
                 # Nastavenie príznaku úspešného odoslania
                 st.session_state.evaluation_submitted = True
@@ -461,48 +475,36 @@ def evaluator_interface():
 def main():
     """Hlavná funkcia aplikácie"""
     
-    # Kontrola URL parametrov s kompatibilitou
-    query_params = get_query_params()
+    # Debug informácie pre URL parametry
+    try:
+        query_params = st.query_params
+        # st.write(f"Debug - Query params: {dict(query_params)}")  # Odkomentuj pre debug
+    except:
+        query_params = {}
     
-    # Spracovanie parametrov pre rôzne formáty
+    # Kontrola URL parametrov
     hide_sidebar = False
-    if 'hide_sidebar' in query_params:
-        hide_sidebar_value = query_params['hide_sidebar']
-        if isinstance(hide_sidebar_value, list):
-            hide_sidebar = hide_sidebar_value[0] == 'true'
-        else:
-            hide_sidebar = hide_sidebar_value == 'true'
+    force_evaluator = False
     
-    # Nastavenie evaluator mode ak je v URL
-    if 'mode' in query_params:
-        mode_value = query_params['mode']
-        if isinstance(mode_value, list):
-            mode_value = mode_value[0]
-        if mode_value == 'evaluator':
-            st.session_state.admin_mode = False
-    
-    # Debug info pre testovanie
     if query_params:
-        st.sidebar.write("🔍 Debug URL params:", query_params)
+        if 'hide_sidebar' in query_params:
+            hide_sidebar = str(query_params.get('hide_sidebar', '')).lower() == 'true'
+        if 'mode' in query_params:
+            if str(query_params.get('mode', '')).lower() == 'evaluator':
+                force_evaluator = True
+                st.session_state.admin_mode = False
     
     # Získanie aktuálneho stavu
     current_state = get_current_state()
     
-    # Ak je sidebar skrytý, force evaluator mode a nie je možné prepnúť
-    if hide_sidebar:
+    # Ak je v URL mode=evaluator alebo hide_sidebar=true, force evaluator mode
+    if hide_sidebar or force_evaluator:
         st.session_state.admin_mode = False
-        # Skryť sidebar CSS
-        st.markdown("""
-        <style>
-        .css-1d391kg {display: none}
-        .css-1rs6os {display: none}
-        .css-17eq0hr {display: none}
-        </style>
-        """, unsafe_allow_html=True)
+        # Zobrazenie len hodnotiteľského rozhrania bez sidebaru
         evaluator_interface()
         return
     
-    # Sidebar pre navigáciu (len pre admin)
+    # Sidebar pre navigáciu (normálny režim)
     with st.sidebar:
         st.title("🧪 Hodnotenie vzoriek")
         
@@ -538,6 +540,14 @@ def main():
             if st.button("🚪 Rýchle odhlásenie", use_container_width=True):
                 st.session_state.admin_authenticated = False
                 st.session_state.admin_mode = False
+                st.rerun()
+        
+        # Debug tlačidlo len pre admin
+        if st.session_state.admin_authenticated:
+            st.divider()
+            if st.button("🔄 Obnoviť cache"):
+                clear_global_cache()
+                st.success("Cache vyčistený!")
                 st.rerun()
     
     # Zobrazenie príslušného rozhrania
