@@ -12,17 +12,42 @@ st.set_page_config(
     layout="wide"
 )
 
-# Inicializácia session state
+# Globálne cache pre zdieľanie dát medzi sessions
+@st.cache_data
+def get_global_state():
+    """Získa globálny stav aplikácie"""
+    return {
+        'session_active': False,
+        'samples_count': 0,
+        'samples_names': [],
+        'evaluations': [],
+        'session_id': str(uuid.uuid4())[:8]
+    }
+
+@st.cache_data
+def update_global_state(new_state):
+    """Aktualizuje globálny stav aplikácie"""
+    return new_state
+
+def get_current_state():
+    """Získa aktuálny stav - buď z cache alebo vytvorí nový"""
+    try:
+        return st.session_state.global_state
+    except:
+        st.session_state.global_state = get_global_state()
+        return st.session_state.global_state
+
+def save_global_state(state):
+    """Uloží stav globálne"""
+    st.session_state.global_state = state
+    # Clear cache a nastaviť nový
+    get_global_state.clear()
+    update_global_state.clear()
+    update_global_state(state)
+
+# Inicializácia session state pre admin mode
 if 'admin_mode' not in st.session_state:
     st.session_state.admin_mode = False
-if 'samples_count' not in st.session_state:
-    st.session_state.samples_count = 0
-if 'samples_names' not in st.session_state:
-    st.session_state.samples_names = []
-if 'evaluations' not in st.session_state:
-    st.session_state.evaluations = []
-if 'session_active' not in st.session_state:
-    st.session_state.session_active = False
 
 def generate_qr_code_url(url):
     """Generuje URL pre QR kód pomocou online služby"""
@@ -38,6 +63,9 @@ def admin_interface():
     """Admin rozhranie pre nastavenie hodnotenia"""
     st.title("🔧 Admin Panel - Nastavenie hodnotenia vzoriek")
     
+    # Získanie aktuálneho stavu
+    current_state = get_current_state()
+    
     with st.container():
         col1, col2 = st.columns([2, 1])
         
@@ -49,7 +77,7 @@ def admin_interface():
                 "Počet vzoriek na hodnotenie:",
                 min_value=2,
                 max_value=20,
-                value=st.session_state.samples_count if st.session_state.samples_count > 0 else 3
+                value=current_state['samples_count'] if current_state['samples_count'] > 0 else 3
             )
             
             # Názvy vzoriek
@@ -59,7 +87,7 @@ def admin_interface():
             for i in range(samples_count):
                 name = st.text_input(
                     f"Vzorka {i+1}:",
-                    value=st.session_state.samples_names[i] if i < len(st.session_state.samples_names) else f"Vzorka {i+1}",
+                    value=current_state['samples_names'][i] if i < len(current_state['samples_names']) else f"Vzorka {i+1}",
                     key=f"sample_name_{i}"
                 )
                 sample_names.append(name)
@@ -69,15 +97,19 @@ def admin_interface():
             
             with col_btn1:
                 if st.button("💾 Uložiť nastavenia", type="primary"):
-                    st.session_state.samples_count = samples_count
-                    st.session_state.samples_names = sample_names
-                    st.session_state.session_active = True
+                    new_state = current_state.copy()
+                    new_state['samples_count'] = samples_count
+                    new_state['samples_names'] = sample_names
+                    new_state['session_active'] = True
+                    save_global_state(new_state)
                     st.success("✅ Nastavenia uložené!")
                     st.rerun()
             
             with col_btn2:
                 if st.button("🔄 Reset hodnotení"):
-                    st.session_state.evaluations = []
+                    new_state = current_state.copy()
+                    new_state['evaluations'] = []
+                    save_global_state(new_state)
                     st.success("✅ Hodnotenia resetované!")
                     st.rerun()
             
@@ -87,7 +119,7 @@ def admin_interface():
                     st.rerun()
         
         with col2:
-            if st.session_state.session_active:
+            if current_state['session_active']:
                 st.subheader("📱 QR kód pre hodnotiteľov")
                 
                 # URL aplikácie na Streamlit Cloud
@@ -115,28 +147,28 @@ def admin_interface():
                 st.caption("💡 Hodnotitelia môžu použiť QR kód alebo odkaz")
     
     # Zobrazenie aktuálnych nastavení
-    if st.session_state.session_active:
+    if current_state['session_active']:
         st.divider()
         st.subheader("📊 Aktuálne nastavenia")
         
         col1, col2 = st.columns(2)
         with col1:
-            st.metric("Počet vzoriek", st.session_state.samples_count)
+            st.metric("Počet vzoriek", current_state['samples_count'])
         with col2:
-            st.metric("Počet hodnotení", len(st.session_state.evaluations))
+            st.metric("Počet hodnotení", len(current_state['evaluations']))
         
         # Zoznam vzoriek
         st.write("**Vzorky na hodnotenie:**")
-        for i, name in enumerate(st.session_state.samples_names):
+        for i, name in enumerate(current_state['samples_names']):
             st.write(f"{i+1}. {name}")
     
     # Zobrazenie výsledkov
-    if st.session_state.evaluations:
+    if current_state['evaluations']:
         st.divider()
         st.subheader("📈 Výsledky hodnotenia")
         
         # Konverzia na DataFrame
-        df = pd.DataFrame(st.session_state.evaluations)
+        df = pd.DataFrame(current_state['evaluations'])
         
         # Základné štatistiky
         st.write("**Prehľad hodnotení:**")
@@ -159,9 +191,12 @@ def evaluator_interface():
     query_params = st.query_params
     hide_sidebar = 'hide_sidebar' in query_params and query_params['hide_sidebar'] == 'true'
     
+    # Získanie aktuálneho stavu
+    current_state = get_current_state()
+    
     st.title("🧪 Hodnotenie vzoriek")
     
-    if not st.session_state.session_active:
+    if not current_state['session_active']:
         st.error("❌ Hodnotenie nie je aktívne. Kontaktujte administrátora.")
         if not hide_sidebar:
             if st.button("🔧 Prejsť na admin panel"):
@@ -180,10 +215,10 @@ def evaluator_interface():
         # Hodnotenie vzoriek
         rankings = {}
         
-        for i, sample_name in enumerate(st.session_state.samples_names):
+        for i, sample_name in enumerate(current_state['samples_names']):
             ranking = st.selectbox(
                 f"Poradie pre {sample_name}:",
-                options=list(range(1, st.session_state.samples_count + 1)),
+                options=list(range(1, current_state['samples_count'] + 1)),
                 key=f"ranking_{i}"
             )
             rankings[sample_name] = ranking
@@ -215,7 +250,10 @@ def evaluator_interface():
                     for sample_name, ranking in rankings.items():
                         evaluation[f'poradie_{sample_name}'] = ranking
                     
-                    st.session_state.evaluations.append(evaluation)
+                    # Aktualizácia globálneho stavu
+                    new_state = current_state.copy()
+                    new_state['evaluations'].append(evaluation)
+                    save_global_state(new_state)
                     
                     st.success("✅ Hodnotenie bolo úspešne odoslané!")
                     st.balloons()
@@ -245,6 +283,9 @@ def main():
     if 'mode' in query_params and query_params['mode'] == 'evaluator':
         st.session_state.admin_mode = False
     
+    # Získanie aktuálneho stavu
+    current_state = get_current_state()
+    
     # Sidebar pre navigáciu (len ak nie je skrytý)
     if not hide_sidebar:
         with st.sidebar:
@@ -264,8 +305,9 @@ def main():
             st.subheader("ℹ️ O aplikácii")
             st.write("Aplikácia na hodnotenie vzoriek v poradí.")
             
-            if st.session_state.session_active:
-                st.success(f"✅ Aktívne hodnotenie\n{st.session_state.samples_count} vzoriek")
+            if current_state['session_active']:
+                st.success(f"✅ Aktívne hodnotenie\n{current_state['samples_count']} vzoriek")
+                st.success(f"📊 {len(current_state['evaluations'])} hodnotení")
             else:
                 st.warning("⚠️ Hodnotenie nie je nastavené")
     
