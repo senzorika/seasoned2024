@@ -582,281 +582,11 @@ def verify_password(password, stored_hash):
     """Overí heslo proti MD5 hash"""
     return hash_password(password) == stored_hash
 
-def generate_qr_code_url(url, size="200x200", error_correction="M"):
-    """Generuje URL pre QR kód pomocou online služby s optimalizáciou pre vonkajšie podmienky"""
+def generate_qr_code_url(url):
+    """Generuje URL pre QR kód pomocou online služby"""
     encoded_url = urllib.parse.quote(url, safe='')
-    # Použitie väčšieho QR kódu s vyššou error correction pre lepšiu čitateľnosť vonku
-    qr_api_url = f"https://api.qrserver.com/v1/create-qr-code/?size={size}&ecc={error_correction}&color=000000&bgcolor=ffffff&margin=2&data={encoded_url}"
+    qr_api_url = f"https://api.qrserver.com/v1/create-qr-code/?size=200x200&data={encoded_url}"
     return qr_api_url
-
-def get_landing_page_css():
-    """CSS pre landing page s QR kódom"""
-    return """
-    <style>
-    .landing-container {
-        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-        min-height: 100vh;
-        display: flex;
-        flex-direction: column;
-        align-items: center;
-        justify-content: center;
-        padding: 2rem;
-        color: white;
-        text-align: center;
-    }
-    
-    .landing-title {
-        font-size: 2.5rem;
-        font-weight: 800;
-        margin-bottom: 1rem;
-        text-shadow: 2px 2px 4px rgba(0,0,0,0.3);
-    }
-    
-    .landing-subtitle {
-        font-size: 1.3rem;
-        margin-bottom: 2rem;
-        opacity: 0.9;
-    }
-    
-    .qr-container {
-        background: white;
-        padding: 2rem;
-        border-radius: 20px;
-        box-shadow: 0 10px 30px rgba(0,0,0,0.3);
-        margin: 2rem 0;
-        animation: pulse 2s infinite;
-    }
-    
-    @keyframes pulse {
-        0% { transform: scale(1); }
-        50% { transform: scale(1.05); }
-        100% { transform: scale(1); }
-    }
-    
-    .qr-instructions {
-        background: rgba(255,255,255,0.1);
-        backdrop-filter: blur(10px);
-        border-radius: 15px;
-        padding: 1.5rem;
-        margin-top: 2rem;
-        border: 1px solid rgba(255,255,255,0.2);
-    }
-    
-    .feature-grid {
-        display: grid;
-        grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
-        gap: 1.5rem;
-        margin-top: 2rem;
-        width: 100%;
-        max-width: 800px;
-    }
-    
-    .feature-card {
-        background: rgba(255,255,255,0.1);
-        backdrop-filter: blur(10px);
-        border-radius: 15px;
-        padding: 1.5rem;
-        border: 1px solid rgba(255,255,255,0.2);
-        transition: transform 0.3s ease;
-    }
-    
-    .feature-card:hover {
-        transform: translateY(-5px);
-    }
-    
-    .action-button {
-        background: linear-gradient(135deg, #ff6b6b, #ee5a24);
-        color: white;
-        padding: 1rem 2rem;
-        border: none;
-        border-radius: 50px;
-        font-size: 1.2rem;
-        font-weight: 600;
-        cursor: pointer;
-        transition: all 0.3s ease;
-        text-decoration: none;
-        display: inline-block;
-        margin: 1rem;
-        box-shadow: 0 4px 15px rgba(0,0,0,0.2);
-    }
-    
-    .action-button:hover {
-        transform: translateY(-2px);
-        box-shadow: 0 6px 20px rgba(0,0,0,0.3);
-    }
-    
-    @media (max-width: 768px) {
-        .landing-title {
-            font-size: 2rem;
-        }
-        
-        .landing-subtitle {
-            font-size: 1.1rem;
-        }
-        
-        .qr-container {
-            padding: 1.5rem;
-            margin: 1.5rem 0;
-        }
-        
-        .feature-grid {
-            grid-template-columns: 1fr;
-            gap: 1rem;
-        }
-    }
-    </style>
-    """
-
-def landing_page_interface():
-    """Dedikovaná landing page pre QR kód"""
-    
-    # Skryť sidebar úplne pre čistý vzhľad
-    st.markdown("""
-    <style>
-    .stSidebar {
-        display: none;
-    }
-    .main > div {
-        padding-top: 0rem;
-    }
-    </style>
-    """, unsafe_allow_html=True)
-    
-    # Aplikuj CSS pre landing page
-    st.markdown(get_landing_page_css(), unsafe_allow_html=True)
-    
-    # Získanie aktuálneho stavu
-    current_state = get_current_state()
-    
-    if not current_state['session_active']:
-        st.markdown("""
-        <div class="landing-container">
-            <h1 class="landing-title">❌ Hodnotenie nie je aktívne</h1>
-            <p class="landing-subtitle">Kontaktujte administrátora pre aktiváciu</p>
-        </div>
-        """, unsafe_allow_html=True)
-        return
-    
-    # Hlavná landing page
-    st.markdown(f"""
-    <div class="landing-container">
-        <h1 class="landing-title">🧪 {current_state['session_name']}</h1>
-        <p class="landing-subtitle">Naskenujte QR kód pre začiatok hodnotenia</p>
-    """, unsafe_allow_html=True)
-    
-    # Veľký QR kód optimalizovaný pre vonkajšie podmienky
-    app_url = "https://consumervote.streamlit.app"
-    evaluator_url = f"{app_url}?mode=evaluator&hide_sidebar=true"
-    
-    # Veľký QR kód s vysokou error correction
-    large_qr_url = generate_qr_code_url(evaluator_url, size="400x400", error_correction="H")
-    
-    st.markdown(f"""
-        <div class="qr-container">
-            <img src="{large_qr_url}" alt="QR kód pre hodnotenie" style="max-width: 100%; height: auto;" />
-        </div>
-        
-        <div class="qr-instructions">
-            <h3>📱 Ako hodnotiť:</h3>
-            <p>1. Naskenujte QR kód fotoaparátom</p>
-            <p>2. Otvorte odkaz v prehliadači</p>
-            <p>3. Vyberte TOP 3 vzorky</p>
-            <p>4. Odošlite hodnotenie</p>
-        </div>
-    """, unsafe_allow_html=True)
-    
-    # Funkcie hodnotenia
-    st.markdown(f"""
-        <div class="feature-grid">
-            <div class="feature-card">
-                <h4>🏆 TOP 3 hodnotenie</h4>
-                <p>Vyberte len 3 najlepšie vzorky zo {current_state['samples_count']} možností</p>
-            </div>
-            
-            <div class="feature-card">
-                <h4>📱 Mobile optimalizované</h4>
-                <p>Perfektne funguje na mobilných zariadeniach</p>
-            </div>
-            
-            <div class="feature-card">
-                <h4>⚡ Rýchle hodnotenie</h4>
-                <p>Hodnotenie trvá len 2-3 minúty</p>
-            </div>
-            
-            <div class="feature-card">
-                <h4>🔒 Anonymné</h4>
-                <p>Zadáte len meno alebo prezývku</p>
-            </div>
-        </div>
-        
-        <a href="{evaluator_url}" class="action-button" target="_blank">
-            🔗 Alebo kliknite pre hodnotenie
-        </a>
-        
-    </div>
-    """, unsafe_allow_html=True)
-
-def get_sharing_qr_css():
-    """CSS pre sharing QR kód po hodnotení"""
-    return """
-    <style>
-    .sharing-container {
-        background: linear-gradient(135deg, #2ecc71, #27ae60);
-        color: white;
-        padding: 2rem;
-        border-radius: 20px;
-        text-align: center;
-        margin: 2rem 0;
-        box-shadow: 0 8px 25px rgba(0,0,0,0.15);
-    }
-    
-    .sharing-title {
-        font-size: 1.8rem;
-        font-weight: 700;
-        margin-bottom: 1rem;
-    }
-    
-    .sharing-qr {
-        background: white;
-        padding: 1.5rem;
-        border-radius: 15px;
-        display: inline-block;
-        margin: 1rem 0;
-        box-shadow: 0 4px 15px rgba(0,0,0,0.1);
-    }
-    
-    .sharing-instructions {
-        background: rgba(255,255,255,0.1);
-        backdrop-filter: blur(10px);
-        border-radius: 12px;
-        padding: 1.5rem;
-        margin-top: 1rem;
-        border: 1px solid rgba(255,255,255,0.2);
-    }
-    
-    .pulse-animation {
-        animation: qr-pulse 3s infinite;
-    }
-    
-    @keyframes qr-pulse {
-        0% { transform: scale(1); box-shadow: 0 4px 15px rgba(0,0,0,0.1); }
-        50% { transform: scale(1.05); box-shadow: 0 6px 20px rgba(0,0,0,0.2); }
-        100% { transform: scale(1); box-shadow: 0 4px 15px rgba(0,0,0,0.1); }
-    }
-    
-    .thank-you-emojis {
-        font-size: 3rem;
-        margin: 1rem 0;
-        animation: bounce 2s infinite;
-    }
-    
-    @keyframes bounce {
-        0%, 20%, 50%, 80%, 100% { transform: translateY(0); }
-        40% { transform: translateY(-10px); }
-        60% { transform: translateY(-5px); }
-    }
-    </style>
-    """
 
 def admin_login():
     """Login formulár pre admin"""
@@ -973,75 +703,29 @@ def admin_interface():
             if current_state['session_active']:
                 st.subheader("📱 QR kód pre hodnotiteľov")
                 
-                # URL aplikácie na Streamlit Cloud - odkaz na landing page
+                # URL aplikácie na Streamlit Cloud
                 app_url = "https://consumervote.streamlit.app"
-                landing_url = f"{app_url}?mode=landing&hide_sidebar=true"
+                evaluator_url = f"{app_url}?mode=evaluator&hide_sidebar=true"
                 
-                # Generovanie QR kódu s optimalizáciou pre vonkajšie podmienky
-                qr_image_url = generate_qr_code_url(landing_url, size="250x250", error_correction="H")
+                # Generovanie a zobrazenie QR kódu
+                qr_image_url = generate_qr_code_url(evaluator_url)
+                st.image(qr_image_url, caption="Naskenujte pre hodnotenie", width=200)
                 
-                # Kontajner pre QR kód
-                st.markdown("""
-                <div style="background: white; padding: 1rem; border-radius: 12px; text-align: center; margin: 1rem 0; box-shadow: 0 4px 12px rgba(0,0,0,0.1);">
+                # Tlačidlo na otvorenie v novom okne
+                st.markdown(f"""
+                <a href="{evaluator_url}" target="_blank" style="
+                    display: inline-block;
+                    padding: 0.5rem 1rem;
+                    background-color: #ff4b4b;
+                    color: white;
+                    text-decoration: none;
+                    border-radius: 0.5rem;
+                    margin: 0.5rem 0;
+                ">🔗 Otvoriť hodnotenie v novom okne</a>
                 """, unsafe_allow_html=True)
                 
-                st.image(qr_image_url, caption="QR kód pre hodnotenie (optimalizovaný pre vonkajšie podmienky)", width=250)
-                
-                st.markdown("</div>", unsafe_allow_html=True)
-                
-                # Tlačidlá pre admin
-                col_btn1, col_btn2 = st.columns(2)
-                
-                with col_btn1:
-                    # Tlačidlo na otvorenie landing page
-                    st.markdown(f"""
-                    <a href="{landing_url}" target="_blank" style="
-                        display: inline-block;
-                        padding: 0.5rem 1rem;
-                        background-color: #2ecc71;
-                        color: white;
-                        text-decoration: none;
-                        border-radius: 0.5rem;
-                        margin: 0.5rem 0;
-                        text-align: center;
-                        width: 100%;
-                        box-sizing: border-box;
-                    ">🖼️ Otvoriť landing page</a>
-                    """, unsafe_allow_html=True)
-                
-                with col_btn2:
-                    # Tlačidlo na priamy vstup do hodnotenia
-                    evaluator_url = f"{app_url}?mode=evaluator&hide_sidebar=true"
-                    st.markdown(f"""
-                    <a href="{evaluator_url}" target="_blank" style="
-                        display: inline-block;
-                        padding: 0.5rem 1rem;
-                        background-color: #ff6b6b;
-                        color: white;
-                        text-decoration: none;
-                        border-radius: 0.5rem;
-                        margin: 0.5rem 0;
-                        text-align: center;
-                        width: 100%;
-                        box-sizing: border-box;
-                    ">🔗 Priame hodnotenie</a>
-                    """, unsafe_allow_html=True)
-                
-                # Informácie o QR kóde
-                st.info("""
-                **💡 QR kód vedie na landing page s:**
-                - Veľký, čitateľný QR kód aj za slnka
-                - Inštrukcie pre hodnotiteľov  
-                - Prehľad funkcií aplikácie
-                - Priamy odkaz na hodnotenie
-                """)
-                
-                # URL pre kopírovanie
-                with st.expander("📋 URL pre kopírovanie"):
-                    st.code(landing_url, language="text")
-                    st.caption("Landing page - ideálne pre zdieľanie")
-                    st.code(evaluator_url, language="text") 
-                    st.caption("Priame hodnotenie - pre pokročilých")
+                st.code(evaluator_url, language="text")
+                st.caption("💡 Hodnotitelia môžu použiť QR kód alebo odkaz")
     
     # Zobrazenie aktuálnych nastavení
     if current_state['session_active']:
@@ -1343,8 +1027,6 @@ def evaluator_interface():
     
     # Aplikuj mobile CSS
     st.markdown(get_mobile_css(), unsafe_allow_html=True)
-    # Aplikuj sharing CSS
-    st.markdown(get_sharing_qr_css(), unsafe_allow_html=True)
     
     # Získanie aktuálneho stavu
     current_state = get_current_state()
@@ -1405,65 +1087,19 @@ def evaluator_interface():
     
     # Ak bolo hodnotenie úspešne odoslané
     if st.session_state.evaluation_submitted:
-        
-        # Aplikuj CSS pre sharing
-        st.markdown(get_sharing_qr_css(), unsafe_allow_html=True)
-        
-        # Ďakovná správa s QR kódom pre sharing
-        app_url = "https://consumervote.streamlit.app"
-        landing_url = f"{app_url}?mode=landing&hide_sidebar=true"
-        
-        # QR kód pre sharing - stredná veľkosť, odkazuje na landing page
-        sharing_qr_url = generate_qr_code_url(landing_url, size="300x300", error_correction="H")
-        
-        st.markdown(f"""
-        <div class="sharing-container">
-            <div class="thank-you-emojis">🎉 🙏 ✨</div>
-            <h2 class="sharing-title">Ďakujeme za hodnotenie!</h2>
-            <p>Vaš názor je pre nás veľmi dôležitý</p>
-            
-            <div class="sharing-qr pulse-animation">
-                <img src="{sharing_qr_url}" alt="QR kód pre zdieľanie" style="max-width: 100%; height: auto;" />
-            </div>
-            
-            <div class="sharing-instructions">
-                <h4>📱 Zdieľajte s priateľmi!</h4>
-                <p><strong>Ukážte tento QR kód ostatným</strong> - môžu si ho naskenovať z vašej obrazovky</p>
-                <p>💡 QR kód funguje aj za denného svetla</p>
-                <p>🔄 Stačí jeden scan a môžu hodnotiť aj oni</p>
-            </div>
+        st.markdown("""
+        <div class="mobile-info">
+            <h3>✅ Hodnotenie úspešne odoslané!</h3>
+            <p>Ďakujeme za váš čas a názor</p>
         </div>
         """, unsafe_allow_html=True)
         
         st.balloons()
         
-        # Tlačidlá pre akcie
-        col1, col2 = st.columns(2)
-        
-        with col1:
-            if st.button("🔄 Nové hodnotenie", type="primary", key="new_eval_btn", help="Začať nové hodnotenie"):
-                st.session_state.evaluation_submitted = False
-                st.session_state.show_confirmation = False
-                st.rerun()
-        
-        with col2:
-            # Odkaz na landing page
-            st.markdown(f"""
-            <a href="{landing_url}" target="_blank" style="
-                display: inline-block;
-                padding: 0.75rem 1.5rem;
-                background-color: #3498db;
-                color: white;
-                text-decoration: none;
-                border-radius: 12px;
-                font-weight: 600;
-                text-align: center;
-                width: 100%;
-                box-sizing: border-box;
-                margin-top: 0.5rem;
-            ">🖼️ Otvoriť landing page</a>
-            """, unsafe_allow_html=True)
-        
+        if st.button("🔄 Nové hodnotenie", type="primary", key="new_eval_btn", help="Začať nové hodnotenie"):
+            st.session_state.evaluation_submitted = False
+            st.session_state.show_confirmation = False
+            st.rerun()
         return
     
     # Krok 1: Hlavný formulár
@@ -1685,29 +1321,18 @@ def main():
     
     hide_sidebar = False
     force_evaluator = False
-    force_landing = False
     
     if query_params:
         if 'hide_sidebar' in query_params:
             hide_sidebar = str(query_params.get('hide_sidebar', '')).lower() == 'true'
         if 'mode' in query_params:
-            mode = str(query_params.get('mode', '')).lower()
-            if mode == 'evaluator':
+            if str(query_params.get('mode', '')).lower() == 'evaluator':
                 force_evaluator = True
-                st.session_state.admin_mode = False
-            elif mode == 'landing':
-                force_landing = True
                 st.session_state.admin_mode = False
     
     # Získanie aktuálneho stavu
     current_state = get_current_state()
     
-    # Ak je force landing mode, zobraz landing page
-    if force_landing:
-        landing_page_interface()
-        return
-    
-    # Ak je evaluator mode alebo hide_sidebar, zobraz evaluator
     if hide_sidebar or force_evaluator:
         st.session_state.admin_mode = False
         evaluator_interface()
@@ -1741,28 +1366,6 @@ def main():
             st.subheader("📊 Aktuálna session")
             st.metric("Vzorky", current_state['samples_count'])
             st.metric("Hodnotenia", len(current_state['evaluations']))
-            
-            # Rýchly prístup k landing page
-            app_url = "https://consumervote.streamlit.app"
-            landing_url = f"{app_url}?mode=landing&hide_sidebar=true"
-            
-            st.markdown("**🔗 Rýchly prístup:**")
-            st.markdown(f"""
-            <a href="{landing_url}" target="_blank" style="
-                display: inline-block;
-                padding: 0.4rem 0.8rem;
-                background-color: #3498db;
-                color: white;
-                text-decoration: none;
-                border-radius: 8px;
-                font-size: 0.9rem;
-                margin: 0.2rem 0;
-                text-align: center;
-                width: 100%;
-                box-sizing: border-box;
-            ">🖼️ Landing page</a>
-            """, unsafe_allow_html=True)
-            
         else:
             st.warning("⚠️ Hodnotenie nie je nastavené")
         
