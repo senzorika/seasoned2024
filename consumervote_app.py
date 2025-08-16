@@ -1,10 +1,9 @@
 import streamlit as st
-import qrcode
-from io import BytesIO
 import pandas as pd
 import json
 from datetime import datetime
 import uuid
+import urllib.parse
 
 # Nastavenie stránky
 st.set_page_config(
@@ -25,25 +24,13 @@ if 'evaluations' not in st.session_state:
 if 'session_active' not in st.session_state:
     st.session_state.session_active = False
 
-def generate_qr_code(url):
-    """Generuje QR kód pre zadanú URL"""
-    qr = qrcode.QRCode(
-        version=1,
-        error_correction=qrcode.constants.ERROR_CORRECT_L,
-        box_size=10,
-        border=4,
-    )
-    qr.add_data(url)
-    qr.make(fit=True)
-    
-    img = qr.make_image(fill_color="black", back_color="white")
-    
-    # Konverzia do bytes pre Streamlit
-    img_buffer = BytesIO()
-    img.save(img_buffer, format='PNG')
-    img_buffer.seek(0)
-    
-    return img_buffer
+def generate_qr_code_url(url):
+    """Generuje URL pre QR kód pomocou online služby"""
+    # Enkódovanie URL pre QR kód
+    encoded_url = urllib.parse.quote(url, safe='')
+    # Použitie bezplatnej QR kód služby
+    qr_api_url = f"https://api.qrserver.com/v1/create-qr-code/?size=200x200&data={encoded_url}"
+    return qr_api_url
 
 
 
@@ -116,8 +103,8 @@ def admin_interface():
                 evaluator_url = f"{current_url}?mode=evaluator&hide_sidebar=true"
                 
                 # Generovanie a zobrazenie QR kódu
-                qr_buffer = generate_qr_code(evaluator_url)
-                st.image(qr_buffer, caption="Naskenujte pre hodnotenie", width=200)
+                qr_image_url = generate_qr_code_url(evaluator_url)
+                st.image(qr_image_url, caption="Naskenujte pre hodnotenie", width=200)
                 
                 # Tlačidlo na otvorenie v novom okne
                 st.markdown(f"""
