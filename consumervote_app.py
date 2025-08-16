@@ -1,6 +1,4 @@
 import streamlit as st
-import qrcode
-from io import BytesIO
 import pandas as pd
 import json
 from datetime import datetime
@@ -25,25 +23,7 @@ if 'evaluations' not in st.session_state:
 if 'session_active' not in st.session_state:
     st.session_state.session_active = False
 
-def generate_qr_code(url):
-    """Generuje QR kód pre zadanú URL"""
-    qr = qrcode.QRCode(
-        version=1,
-        error_correction=qrcode.constants.ERROR_CORRECT_L,
-        box_size=10,
-        border=4,
-    )
-    qr.add_data(url)
-    qr.make(fit=True)
-    
-    img = qr.make_image(fill_color="black", back_color="white")
-    
-    # Konverzia do bytes pre Streamlit
-    img_buffer = BytesIO()
-    img.save(img_buffer, format='PNG')
-    img_buffer.seek(0)
-    
-    return img_buffer
+
 
 def admin_interface():
     """Admin rozhranie pre nastavenie hodnotenia"""
@@ -99,19 +79,20 @@ def admin_interface():
         
         with col2:
             if st.session_state.session_active:
-                st.subheader("QR kód pre hodnotiteľov")
+                st.subheader("🔗 Odkaz pre hodnotiteľov")
                 
                 # Generovanie URL pre hodnotiteľov
                 # V skutočnej aplikácii by ste použili skutočnú URL
                 current_url = "http://localhost:8501"  # Zmeňte na vašu skutočnú URL
                 evaluator_url = f"{current_url}?mode=evaluator"
                 
-                # Generovanie a zobrazenie QR kódu
-                qr_buffer = generate_qr_code(evaluator_url)
-                st.image(qr_buffer, caption="Naskenujte pre hodnotenie", width=200)
-                
+                # Zobrazenie odkazu
                 st.code(evaluator_url, language="text")
-                st.caption("💡 Hodnotitelia môžu použiť tento odkaz alebo QR kód")
+                st.caption("💡 Hodnotitelia môžu použiť tento odkaz")
+                
+                if st.button("📋 Kopírovať odkaz"):
+                    st.write("Odkaz skopírovaný do schránky!")
+                    st.balloons()
     
     # Zobrazenie aktuálnych nastavení
     if st.session_state.session_active:
