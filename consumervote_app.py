@@ -48,6 +48,33 @@ def save_global_state(state):
 # Inicializácia session state pre admin mode
 if 'admin_mode' not in st.session_state:
     st.session_state.admin_mode = False
+if 'admin_authenticated' not in st.session_state:
+    st.session_state.admin_authenticated = False
+
+# Admin heslo
+ADMIN_PASSWORD = "consumertest24"
+
+def admin_login():
+    """Login formulár pre admin"""
+    st.title("🔐 Admin Login")
+    st.write("Zadajte heslo pre prístup k admin panelu:")
+    
+    with st.form("admin_login_form"):
+        password = st.text_input("Heslo:", type="password", placeholder="Zadajte admin heslo")
+        submitted = st.form_submit_button("🔓 Prihlásiť sa", type="primary")
+        
+        if submitted:
+            if password == ADMIN_PASSWORD:
+                st.session_state.admin_authenticated = True
+                st.success("✅ Úspešne prihlásený!")
+                st.rerun()
+            else:
+                st.error("❌ Nesprávne heslo!")
+    
+    st.divider()
+    if st.button("👥 Prejsť na hodnotenie"):
+        st.session_state.admin_mode = False
+        st.rerun()
 
 def generate_qr_code_url(url):
     """Generuje URL pre QR kód pomocou online služby"""
@@ -61,7 +88,20 @@ def generate_qr_code_url(url):
 
 def admin_interface():
     """Admin rozhranie pre nastavenie hodnotenia"""
-    st.title("🔧 Admin Panel - Nastavenie hodnotenia vzoriek")
+    
+    # Kontrola autentifikácie
+    if not st.session_state.admin_authenticated:
+        admin_login()
+        return
+    
+    # Header s možnosťou odhlásenia
+    col1, col2 = st.columns([3, 1])
+    with col1:
+        st.title("🔧 Admin Panel - Nastavenie hodnotenia vzoriek")
+    with col2:
+        if st.button("🚪 Odhlásiť sa"):
+            st.session_state.admin_authenticated = False
+            st.rerun()
     
     # Získanie aktuálneho stavu
     current_state = get_current_state()
@@ -438,6 +478,12 @@ def main():
     with st.sidebar:
         st.title("🧪 Hodnotenie vzoriek")
         
+        # Zobrazenie stavu autentifikácie
+        if st.session_state.admin_authenticated:
+            st.success("✅ Admin prihlásený")
+        else:
+            st.info("🔐 Admin neprihlásený")
+        
         mode = st.radio(
             "Vyberte režim:",
             ["👥 Hodnotiteľ", "🔧 Administrátor"],
@@ -457,6 +503,14 @@ def main():
             st.success(f"📊 {len(current_state['evaluations'])} hodnotení")
         else:
             st.warning("⚠️ Hodnotenie nie je nastavené")
+        
+        # Rýchle odhlásenie ak je prihlásený
+        if st.session_state.admin_authenticated:
+            st.divider()
+            if st.button("🚪 Rýchle odhlásenie", use_container_width=True):
+                st.session_state.admin_authenticated = False
+                st.session_state.admin_mode = False
+                st.rerun()
     
     # Zobrazenie príslušného rozhrania
     if st.session_state.admin_mode:
