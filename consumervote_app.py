@@ -62,6 +62,24 @@ def init_database():
         )
     ''')
     
+    # Tabuľka pre audit log
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS audit_log (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            admin_session_id TEXT,
+            admin_ip TEXT,
+            action_type TEXT NOT NULL,
+            action_description TEXT NOT NULL,
+            session_name TEXT,
+            old_values TEXT,
+            new_values TEXT,
+            affected_records INTEGER DEFAULT 1,
+            success BOOLEAN DEFAULT 1,
+            error_message TEXT
+        )
+    ''')
+    
     # Vloženie základného záznamu ak neexistuje
     cursor.execute('SELECT COUNT(*) FROM evaluation_settings')
     if cursor.fetchone()[0] == 0:
@@ -83,6 +101,127 @@ def init_database():
     
     conn.commit()
     conn.close()
+
+def get_admin_session_info():
+    """Získa informácie o admin session pre audit"""
+    try:
+        # Získanie IP adresy
+        headers = st.context.headers if hasattr(st.context, 'headers') else {}
+        ip_address = (
+            headers.get('x-forwarded-for', '').split(',')[0].strip() or
+            headers.get('x-real-ip', '') or
+            headers.get('remote-addr', 'unknown')
+        )
+        
+        # Vytvorenie session ID
+        session_id = f"admin_{hashlib.md5(f'{ip_address}_{datetime.now().date()}'.encode()).hexdigest()[:8]}"
+        
+        return session_id, ip_address
+    except:
+        return "admin_unknown", "unknown"
+
+def log_audit_action(action_type, action_description, session_name=None, old_values=None, new_values=None, affected_records=1, success=True, error_message=None):
+    """Zaznamená audit akciu do databázy"""
+    conn = sqlite3.connect("consumervote.db")
+    cursor = conn.cursor()
+    
+    try:
+        admin_session_id, admin_ip = get_admin_session_info()
+        
+        cursor.execute('''
+            INSERT INTO audit_log 
+            (admin_session_id, admin_ip, action_type, action_description, session_name, 
+             old_values, new_values, affected_records, success, error_message)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ''', (
+            admin_session_id, admin_ip, action_type, action_description, session_name,
+            json.dumps(old_values) if old_values else None,
+            json.dumps(new_values) if new_values else None,
+            affected_records, success, error_message
+        ))
+        
+        conn.commit()
+        return True
+    except Exception as e:
+        print(f"Audit log error: {e}")
+        return False
+    finally:
+        conn.close()
+
+def get_audit_logs(limit=50, action_type=None, session_name=None):
+    """Získa audit logy z databázy"""
+    conn = sqlite3.connect("consumervote.db")
+    cursor = conn.cursor()
+    
+    try:
+        query = '''
+            SELECT timestamp, admin_session_id, admin_ip, action_type, action_description,
+                   session_name, old_values, new_values, affected_records, success, error_message
+            FROM audit_log
+        '''
+        params = []
+        
+        conditions = []
+        if action_type:
+            conditions.append("action_type = ?")
+            params.append(action_type)
+        if session_name:
+            conditions.append("session_name = ?")
+            params.append(session_name)
+        
+        if conditions:
+            query += " WHERE " + " AND ".join(conditions)
+        
+        query += " ORDER BY timestamp DESC LIMIT ?"
+        params.append(limit)
+        
+        cursor.execute(query, params)
+        return cursor.fetchall()
+    except Exception as e:
+        st.error(f"Chyba pri načítaní audit logov: {e}")
+        return []
+    finally:
+        conn.close()
+
+def get_audit_statistics():
+    """Získa základné štatistiky auditov"""
+    conn = sqlite3.connect("consumervote.db")
+    cursor = conn.cursor()
+    
+    try:
+        # Celkový počet akcií
+        cursor.execute('SELECT COUNT(*) FROM audit_log')
+        total_actions = cursor.fetchone()[0]
+        
+        # Posledná aktivita
+        cursor.execute('SELECT MAX(timestamp) FROM audit_log')
+        last_activity = cursor.fetchone()[0]
+        
+        # Najpopulárnejšie akcie
+        cursor.execute('''
+            SELECT action_type, COUNT(*) as count 
+            FROM audit_log 
+            GROUP BY action_type 
+            ORDER BY count DESC 
+            LIMIT 5
+        ''')
+        popular_actions = cursor.fetchall()
+        
+        # Úspešnosť akcií
+        cursor.execute('SELECT success, COUNT(*) FROM audit_log GROUP BY success')
+        success_stats = dict(cursor.fetchall())
+        
+        return {
+            'total_actions': total_actions,
+            'last_activity': last_activity,
+            'popular_actions': popular_actions,
+            'success_rate': success_stats.get(1, 0) / max(total_actions, 1) * 100
+        }
+    except Exception as e:
+        st.error(f"Chyba pri získavaní audit štatistík: {e}")
+        return {'total_actions': 0, 'last_activity': None, 'popular_actions': [], 'success_rate': 0}
+    finally:
+        conn.close()
 
 def get_current_state():
     """Získa aktuálny stav z databázy"""
@@ -169,8 +308,25 @@ def save_evaluation(session_name, evaluator_name, evaluation_data, comment=""):
         ''', (session_name, evaluator_name, json.dumps(evaluation_data), comment))
         
         conn.commit()
+        
+        # Audit log pre nové hodnotenie (nelogujeme citlivé údaje hodnotiteľa)
+        log_audit_action(
+            action_type="EVALUATION_SUBMIT",
+            action_description=f"Nové hodnotenie odoslané pre session '{session_name}'",
+            session_name=session_name,
+            new_values={"evaluator_type": "anonymous", "has_comment": bool(comment)},
+            success=True
+        )
+        
         return True
     except Exception as e:
+        log_audit_action(
+            action_type="EVALUATION_SUBMIT",
+            action_description=f"Chyba pri ukladaní hodnotenia pre session '{session_name}'",
+            session_name=session_name,
+            success=False,
+            error_message=str(e)
+        )
         st.error(f"Chyba pri ukladaní hodnotenia: {e}")
         return False
     finally:
@@ -326,6 +482,8 @@ def get_device_stats(session_name):
         return {'unique_devices': 0, 'total_evaluations': 0, 'last_activity': None}
     finally:
         conn.close()
+
+def get_mobile_css():
     """Vráti CSS štýly optimalizované pre mobilné zariadenia"""
     return """
     <style>
@@ -1132,211 +1290,185 @@ def admin_interface():
         df_display = pd.DataFrame(current_state['evaluations'][-10:])
         st.dataframe(df_display, use_container_width=True)
 
-def get_mobile_css():
-    """Vráti CSS štýly optimalizované pre mobilné zariadenia"""
-    return """
-    <style>
-    /* Mobile-first responsive design */
-    @media screen and (max-width: 768px) {
-        .main .block-container {
-            padding-left: 1rem !important;
-            padding-right: 1rem !important;
-            max-width: 100% !important;
-        }
-    }
+def audit_interface():
+    """Rozhranie pre zobrazenie audit logov"""
     
-    /* Väčšie tlačidlá pre touch */
-    .stButton > button {
-        min-height: 3.5rem !important;
-        font-size: 1.1rem !important;
-        font-weight: 600 !important;
-        border-radius: 12px !important;
-        border: 2px solid transparent !important;
-        transition: all 0.2s ease !important;
-    }
+    st.subheader("📋 Audit Log - História aktivít")
     
-    .stButton > button:hover {
-        transform: translateY(-2px) !important;
-        box-shadow: 0 4px 12px rgba(0,0,0,0.15) !important;
-    }
+    # Audit štatistiky
+    stats = get_audit_statistics()
     
-    /* Primárne tlačidlá */
-    .stButton > button[kind="primary"] {
-        background: linear-gradient(135deg, #ff6b6b, #ee5a24) !important;
-        color: white !important;
-        border: none !important;
-    }
+    col1, col2, col3, col4 = st.columns(4)
+    with col1:
+        st.metric("Celkom akcií", stats['total_actions'])
+    with col2:
+        st.metric("Úspešnosť", f"{stats['success_rate']:.1f}%")
+    with col3:
+        if stats['last_activity']:
+            last_activity = datetime.strptime(stats['last_activity'], '%Y-%m-%d %H:%M:%S')
+            time_ago = datetime.now() - last_activity
+            if time_ago.days > 0:
+                time_str = f"{time_ago.days}d"
+            elif time_ago.seconds > 3600:
+                time_str = f"{time_ago.seconds//3600}h"
+            else:
+                time_str = f"{time_ago.seconds//60}m"
+            st.metric("Posledná aktivita", time_str)
+        else:
+            st.metric("Posledná aktivita", "N/A")
+    with col4:
+        admin_session_id, _ = get_admin_session_info()
+        st.metric("Session ID", admin_session_id[-8:])
     
-    /* Selectboxy optimalizované pre mobile */
-    .stSelectbox > div > div > div {
-        min-height: 3.5rem !important;
-        font-size: 1.1rem !important;
-        border-radius: 12px !important;
-        border: 2px solid #e0e0e0 !important;
-    }
+    # Filtre pre audit logy
+    st.markdown("### 🔍 Filtre")
+    col1, col2, col3 = st.columns(3)
     
-    .stSelectbox > div > div > div:focus-within {
-        border-color: #ff6b6b !important;
-        box-shadow: 0 0 0 3px rgba(255, 107, 107, 0.1) !important;
-    }
+    with col1:
+        action_filter = st.selectbox(
+            "Typ akcie:",
+            options=['Všetky', 'AUTH_LOGIN', 'AUTH_LOGIN_FAILED', 'SETTINGS_UPDATE', 'DATA_DELETE', 'EVALUATION_SUBMIT'],
+            key="audit_action_filter"
+        )
     
-    /* Text inputy */
-    .stTextInput > div > div > input {
-        min-height: 3.5rem !important;
-        font-size: 1.1rem !important;
-        border-radius: 12px !important;
-        border: 2px solid #e0e0e0 !important;
-        padding: 0 1rem !important;
-    }
-    
-    .stTextInput > div > div > input:focus {
-        border-color: #ff6b6b !important;
-        box-shadow: 0 0 0 3px rgba(255, 107, 107, 0.1) !important;
-    }
-    
-    /* Text area */
-    .stTextArea > div > div > textarea {
-        min-height: 6rem !important;
-        font-size: 1.1rem !important;
-        border-radius: 12px !important;
-        border: 2px solid #e0e0e0 !important;
-        padding: 1rem !important;
-    }
-    
-    .stTextArea > div > div > textarea:focus {
-        border-color: #ff6b6b !important;
-        box-shadow: 0 0 0 3px rgba(255, 107, 107, 0.1) !important;
-    }
-    
-    /* Medaily pre mobile */
-    .medal-card {
-        background: white;
-        border-radius: 16px;
-        padding: 1.5rem;
-        margin: 0.5rem 0;
-        box-shadow: 0 2px 8px rgba(0,0,0,0.1);
-        border: 2px solid transparent;
-        transition: all 0.3s ease;
-    }
-    
-    .medal-card.selected-1 {
-        background: linear-gradient(135deg, #ffd700, #ffed4e);
-        border-color: #f39c12;
-        transform: scale(1.02);
-    }
-    
-    .medal-card.selected-2 {
-        background: linear-gradient(135deg, #c0c0c0, #ecf0f1);
-        border-color: #95a5a6;
-        transform: scale(1.02);
-    }
-    
-    .medal-card.selected-3 {
-        background: linear-gradient(135deg, #cd7f32, #d35400);
-        border-color: #e67e22;
-        color: white;
-        transform: scale(1.02);
-    }
-    
-    /* Alert komponenty */
-    .stAlert {
-        border-radius: 12px !important;
-        border: none !important;
-        box-shadow: 0 2px 8px rgba(0,0,0,0.1) !important;
-    }
-    
-    /* Spacing pre mobile */
-    .mobile-spacing {
-        margin: 1.5rem 0;
-    }
-    
-    .mobile-title {
-        font-size: 1.8rem !important;
-        font-weight: 700 !important;
-        text-align: center !important;
-        margin-bottom: 1rem !important;
-        color: #2c3e50 !important;
-    }
-    
-    .mobile-subtitle {
-        font-size: 1.3rem !important;
-        font-weight: 600 !important;
-        margin: 1.5rem 0 1rem 0 !important;
-        color: #34495e !important;
-    }
-    
-    /* Responsívne stĺpce */
-    @media screen and (max-width: 768px) {
-        .stColumns {
-            flex-direction: column !important;
-        }
+    with col2:
+        # Získanie dostupných session names
+        current_state = get_current_state()
+        session_options = ['Všetky sessions']
+        if current_state['session_name']:
+            session_options.append(current_state['session_name'])
         
-        .stColumn {
-            width: 100% !important;
-            margin-bottom: 1rem !important;
-        }
-    }
+        session_filter = st.selectbox(
+            "Session:",
+            options=session_options,
+            key="audit_session_filter"
+        )
     
-    /* Loading spinner */
-    .loading-spinner {
-        display: inline-block;
-        width: 20px;
-        height: 20px;
-        border: 3px solid rgba(255,255,255,.3);
-        border-radius: 50%;
-        border-top-color: #fff;
-        animation: spin 1s ease-in-out infinite;
-    }
+    with col3:
+        limit = st.number_input(
+            "Počet záznamov:",
+            min_value=10,
+            max_value=200,
+            value=50,
+            step=10,
+            key="audit_limit"
+        )
     
-    @keyframes spin {
-        to { transform: rotate(360deg); }
-    }
+    # Získanie audit logov s filtrami
+    action_type = None if action_filter == 'Všetky' else action_filter
+    session_name = None if session_filter == 'Všetky sessions' else session_filter
     
-    /* Mobile info box */
-    .mobile-info {
-        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-        color: white;
-        padding: 1.5rem;
-        border-radius: 16px;
-        margin: 1rem 0;
-        text-align: center;
-        box-shadow: 0 4px 15px rgba(0,0,0,0.1);
-    }
+    audit_logs = get_audit_logs(limit=limit, action_type=action_type, session_name=session_name)
     
-    /* Progress indicator */
-    .progress-steps {
-        display: flex;
-        justify-content: center;
-        align-items: center;
-        margin: 2rem 0;
-        flex-wrap: wrap;
-    }
+    if audit_logs:
+        st.markdown("### 📊 Audit záznamy")
+        
+        # Vytvorenie DataFrame pre lepšie zobrazenie
+        audit_data = []
+        for log in audit_logs:
+            timestamp, admin_session_id, admin_ip, action_type, action_description, session_name, old_values, new_values, affected_records, success, error_message = log
+            
+            audit_data.append({
+                'Čas': timestamp,
+                'Admin Session': admin_session_id[-8:] if admin_session_id else 'N/A',
+                'IP': admin_ip,
+                'Akcia': action_type,
+                'Popis': action_description,
+                'Session': session_name or 'N/A',
+                'Záznamy': affected_records,
+                'Úspech': '✅' if success else '❌',
+                'Chyba': error_message or ''
+            })
+        
+        df = pd.DataFrame(audit_data)
+        
+        # Zobrazenie tabuľky
+        st.dataframe(df, use_container_width=True, height=400)
+        
+        # Export audit logov
+        col1, col2 = st.columns(2)
+        
+        with col1:
+            if st.button("📥 Export audit logov (CSV)"):
+                csv = df.to_csv(index=False)
+                st.download_button(
+                    label="Stiahnuť CSV",
+                    data=csv,
+                    file_name=f"audit_log_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv",
+                    mime="text/csv"
+                )
+        
+        with col2:
+            if st.button("🗑️ Vyčistiť staré audit logy (>30 dní)"):
+                conn = sqlite3.connect("consumervote.db")
+                cursor = conn.cursor()
+                try:
+                    cursor.execute('''
+                        DELETE FROM audit_log 
+                        WHERE timestamp < datetime('now', '-30 days')
+                    ''')
+                    deleted_count = cursor.rowcount
+                    conn.commit()
+                    
+                    # Log čistenia auditov
+                    log_audit_action(
+                        action_type="AUDIT_CLEANUP",
+                        action_description=f"Vyčistené staré audit logy (vymazaných {deleted_count} záznamov)",
+                        affected_records=deleted_count,
+                        success=True
+                    )
+                    
+                    st.success(f"✅ Vymazaných {deleted_count} starých audit záznamov")
+                    st.rerun()
+                except Exception as e:
+                    st.error(f"❌ Chyba pri čistení: {e}")
+                finally:
+                    conn.close()
+        
+        # Detailné zobrazenie vybraného záznamu
+        if st.checkbox("🔍 Zobraziť detaily záznamov"):
+            for i, log in enumerate(audit_logs[:10]):  # Zobraz len prvých 10 pre performance
+                timestamp, admin_session_id, admin_ip, action_type, action_description, session_name, old_values, new_values, affected_records, success, error_message = log
+                
+                with st.expander(f"{timestamp} - {action_type} {'✅' if success else '❌'}"):
+                    col1, col2 = st.columns(2)
+                    
+                    with col1:
+                        st.write(f"**Admin Session:** {admin_session_id}")
+                        st.write(f"**IP Adresa:** {admin_ip}")
+                        st.write(f"**Typ akcie:** {action_type}")
+                        st.write(f"**Ovplyvnené záznamy:** {affected_records}")
+                    
+                    with col2:
+                        st.write(f"**Session:** {session_name or 'N/A'}")
+                        st.write(f"**Úspech:** {'✅ Áno' if success else '❌ Nie'}")
+                        if error_message:
+                            st.error(f"**Chyba:** {error_message}")
+                    
+                    st.write(f"**Popis:** {action_description}")
+                    
+                    if old_values:
+                        try:
+                            old_data = json.loads(old_values)
+                            st.json({"Staré hodnoty": old_data})
+                        except:
+                            st.text(f"Staré hodnoty: {old_values}")
+                    
+                    if new_values:
+                        try:
+                            new_data = json.loads(new_values)
+                            st.json({"Nové hodnoty": new_data})
+                        except:
+                            st.text(f"Nové hodnoty: {new_values}")
     
-    .progress-step {
-        width: 40px;
-        height: 40px;
-        border-radius: 50%;
-        background-color: #e0e0e0;
-        display: flex;
-        align-items: center;
-        justify-content: center;
-        margin: 0 0.5rem;
-        font-weight: bold;
-        transition: all 0.3s ease;
-    }
+    else:
+        st.info("📝 Žiadne audit záznamy neboli nájdené pre zadané filtre")
     
-    .progress-step.active {
-        background-color: #ff6b6b;
-        color: white;
-        transform: scale(1.1);
-    }
-    
-    .progress-step.completed {
-        background-color: #2ecc71;
-        color: white;
-    }
-    </style>
-    """
+    # Najpopulárnejšie akcie
+    if stats['popular_actions']:
+        st.markdown("### 📈 Najčastejšie akcie")
+        popular_df = pd.DataFrame(stats['popular_actions'], columns=['Typ akcie', 'Počet'])
+        st.bar_chart(popular_df.set_index('Typ akcie'))
 
 def evaluator_interface():
     """Mobile-first rozhranie pre hodnotiteľov"""
@@ -1420,7 +1552,7 @@ def evaluator_interface():
         <div class="sharing-container">
             <div class="thank-you-emojis">🎉 🙏 ✨</div>
             <h2 class="sharing-title">Ďakujeme za hodnotenie!</h2>
-            <p>Vaš názor je pre nás veľmi dôležitý</p>
+            <p>Váš názor je pre nás veľmi dôležitý</p>
             
             <div class="sharing-qr pulse-animation">
                 <img src="{sharing_qr_url}" alt="QR kód pre zdieľanie" style="max-width: 100%; height: auto;" />
