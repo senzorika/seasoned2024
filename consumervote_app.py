@@ -80,6 +80,19 @@ def init_database():
         )
     ''')
     
+    # Tabuľka pre admin sessions (pre persistence)
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS admin_sessions (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            session_token TEXT UNIQUE NOT NULL,
+            ip_address TEXT,
+            user_agent TEXT,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            last_activity TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            expires_at TIMESTAMP
+        )
+    ''')
+    
     # Vloženie základného záznamu ak neexistuje
     cursor.execute('SELECT COUNT(*) FROM evaluation_settings')
     if cursor.fetchone()[0] == 0:
@@ -102,20 +115,99 @@ def init_database():
     conn.commit()
     conn.close()
 
-def get_admin_session_info():
-    """Získa informácie o admin session pre audit"""
+def get_client_info():
+    """Získa informácie o klientovi"""
     try:
-        # Získanie IP adresy
         headers = st.context.headers if hasattr(st.context, 'headers') else {}
         ip_address = (
             headers.get('x-forwarded-for', '').split(',')[0].strip() or
             headers.get('x-real-ip', '') or
             headers.get('remote-addr', 'unknown')
         )
+        user_agent = headers.get('user-agent', 'unknown')
+        return ip_address, user_agent
+    except:
+        return "unknown", "unknown"
+
+def create_admin_session():
+    """Vytvorí admin session token"""
+    ip_address, user_agent = get_client_info()
+    session_token = hashlib.md5(f"{ip_address}_{user_agent}_{datetime.now().timestamp()}".encode()).hexdigest()
+    
+    conn = sqlite3.connect("consumervote.db")
+    cursor = conn.cursor()
+    
+    try:
+        # Vymaž staré sessions (starší ako 24 hodín)
+        cursor.execute("DELETE FROM admin_sessions WHERE expires_at < datetime('now')")
         
-        # Vytvorenie session ID
+        # Vytvor novú session (platná 24 hodín)
+        cursor.execute('''
+            INSERT INTO admin_sessions (session_token, ip_address, user_agent, expires_at)
+            VALUES (?, ?, ?, datetime('now', '+24 hours'))
+        ''', (session_token, ip_address, user_agent))
+        
+        conn.commit()
+        return session_token
+    except Exception as e:
+        print(f"Error creating admin session: {e}")
+        return None
+    finally:
+        conn.close()
+
+def verify_admin_session(session_token):
+    """Overí admin session token"""
+    if not session_token:
+        return False
+        
+    conn = sqlite3.connect("consumervote.db")
+    cursor = conn.cursor()
+    
+    try:
+        cursor.execute('''
+            SELECT id FROM admin_sessions 
+            WHERE session_token = ? AND expires_at > datetime('now')
+        ''', (session_token,))
+        
+        result = cursor.fetchone()
+        
+        if result:
+            # Aktualizuj last_activity
+            cursor.execute('''
+                UPDATE admin_sessions 
+                SET last_activity = datetime('now') 
+                WHERE session_token = ?
+            ''', (session_token,))
+            conn.commit()
+            return True
+        return False
+    except Exception as e:
+        print(f"Error verifying admin session: {e}")
+        return False
+    finally:
+        conn.close()
+
+def destroy_admin_session(session_token):
+    """Zruší admin session"""
+    if not session_token:
+        return
+        
+    conn = sqlite3.connect("consumervote.db")
+    cursor = conn.cursor()
+    
+    try:
+        cursor.execute("DELETE FROM admin_sessions WHERE session_token = ?", (session_token,))
+        conn.commit()
+    except Exception as e:
+        print(f"Error destroying admin session: {e}")
+    finally:
+        conn.close()
+
+def get_admin_session_info():
+    """Získa informácie o admin session pre audit"""
+    try:
+        ip_address, user_agent = get_client_info()
         session_id = f"admin_{hashlib.md5(f'{ip_address}_{datetime.now().date()}'.encode()).hexdigest()[:8]}"
-        
         return session_id, ip_address
     except:
         return "admin_unknown", "unknown"
@@ -145,81 +237,6 @@ def log_audit_action(action_type, action_description, session_name=None, old_val
     except Exception as e:
         print(f"Audit log error: {e}")
         return False
-    finally:
-        conn.close()
-
-def get_audit_logs(limit=50, action_type=None, session_name=None):
-    """Získa audit logy z databázy"""
-    conn = sqlite3.connect("consumervote.db")
-    cursor = conn.cursor()
-    
-    try:
-        query = '''
-            SELECT timestamp, admin_session_id, admin_ip, action_type, action_description,
-                   session_name, old_values, new_values, affected_records, success, error_message
-            FROM audit_log
-        '''
-        params = []
-        
-        conditions = []
-        if action_type:
-            conditions.append("action_type = ?")
-            params.append(action_type)
-        if session_name:
-            conditions.append("session_name = ?")
-            params.append(session_name)
-        
-        if conditions:
-            query += " WHERE " + " AND ".join(conditions)
-        
-        query += " ORDER BY timestamp DESC LIMIT ?"
-        params.append(limit)
-        
-        cursor.execute(query, params)
-        return cursor.fetchall()
-    except Exception as e:
-        st.error(f"Chyba pri načítaní audit logov: {e}")
-        return []
-    finally:
-        conn.close()
-
-def get_audit_statistics():
-    """Získa základné štatistiky auditov"""
-    conn = sqlite3.connect("consumervote.db")
-    cursor = conn.cursor()
-    
-    try:
-        # Celkový počet akcií
-        cursor.execute('SELECT COUNT(*) FROM audit_log')
-        total_actions = cursor.fetchone()[0]
-        
-        # Posledná aktivita
-        cursor.execute('SELECT MAX(timestamp) FROM audit_log')
-        last_activity = cursor.fetchone()[0]
-        
-        # Najpopulárnejšie akcie
-        cursor.execute('''
-            SELECT action_type, COUNT(*) as count 
-            FROM audit_log 
-            GROUP BY action_type 
-            ORDER BY count DESC 
-            LIMIT 5
-        ''')
-        popular_actions = cursor.fetchall()
-        
-        # Úspešnosť akcií
-        cursor.execute('SELECT success, COUNT(*) FROM audit_log GROUP BY success')
-        success_stats = dict(cursor.fetchall())
-        
-        return {
-            'total_actions': total_actions,
-            'last_activity': last_activity,
-            'popular_actions': popular_actions,
-            'success_rate': success_stats.get(1, 0) / max(total_actions, 1) * 100
-        }
-    except Exception as e:
-        st.error(f"Chyba pri získavaní audit štatistík: {e}")
-        return {'total_actions': 0, 'last_activity': None, 'popular_actions': [], 'success_rate': 0}
     finally:
         conn.close()
 
@@ -289,6 +306,16 @@ def save_evaluation_settings(session_name, samples_count, samples_names, session
         ''', (session_name, samples_count, json.dumps(samples_names), int(session_active)))
         
         conn.commit()
+        
+        # Audit log
+        log_audit_action(
+            action_type="SETTINGS_UPDATE",
+            action_description=f"Nastavenia aktualizované pre session '{session_name}'",
+            session_name=session_name,
+            new_values={"samples_count": samples_count, "session_active": session_active},
+            success=True
+        )
+        
         return True
     except Exception as e:
         st.error(f"Chyba pri ukladaní nastavení: {e}")
@@ -335,16 +362,7 @@ def save_evaluation(session_name, evaluator_name, evaluation_data, comment=""):
 def get_device_fingerprint():
     """Vytvorí fingerprint zariadenia na základe IP a user agent"""
     try:
-        # Získanie IP adresy
-        headers = st.context.headers if hasattr(st.context, 'headers') else {}
-        ip_address = (
-            headers.get('x-forwarded-for', '').split(',')[0].strip() or
-            headers.get('x-real-ip', '') or
-            headers.get('remote-addr', 'unknown')
-        )
-        
-        # User agent
-        user_agent = headers.get('user-agent', 'unknown')
+        ip_address, user_agent = get_client_info()
         
         # Vytvorenie fingerprint
         fingerprint_data = f"{ip_address}:{user_agent}"
@@ -408,9 +426,23 @@ def clear_evaluations_for_session(session_name):
     
     try:
         cursor.execute('DELETE FROM evaluations WHERE session_name = ? OR session_name IS NULL', (session_name,))
+        deleted_evaluations = cursor.rowcount
+        
         # Vymaž aj device tracking pre túto session
         cursor.execute('DELETE FROM device_tracking WHERE session_name = ?', (session_name,))
+        deleted_devices = cursor.rowcount
+        
         conn.commit()
+        
+        # Audit log
+        log_audit_action(
+            action_type="DATA_DELETE",
+            action_description=f"Vymazané hodnotenia pre session '{session_name}' (hodnotenia: {deleted_evaluations}, zariadenia: {deleted_devices})",
+            session_name=session_name,
+            affected_records=deleted_evaluations + deleted_devices,
+            success=True
+        )
+        
         return True
     except Exception as e:
         st.error(f"Chyba pri mazaní hodnotení: {e}")
@@ -559,101 +591,6 @@ def get_mobile_css():
         box-shadow: 0 0 0 3px rgba(255, 107, 107, 0.1) !important;
     }
     
-    /* Medaily pre mobile */
-    .medal-card {
-        background: white;
-        border-radius: 16px;
-        padding: 1.5rem;
-        margin: 0.5rem 0;
-        box-shadow: 0 2px 8px rgba(0,0,0,0.1);
-        border: 2px solid transparent;
-        transition: all 0.3s ease;
-    }
-    
-    .medal-card.selected-1 {
-        background: linear-gradient(135deg, #ffd700, #ffed4e);
-        border-color: #f39c12;
-        transform: scale(1.02);
-    }
-    
-    .medal-card.selected-2 {
-        background: linear-gradient(135deg, #c0c0c0, #ecf0f1);
-        border-color: #95a5a6;
-        transform: scale(1.02);
-    }
-    
-    .medal-card.selected-3 {
-        background: linear-gradient(135deg, #cd7f32, #d35400);
-        border-color: #e67e22;
-        color: white;
-        transform: scale(1.02);
-    }
-    
-    /* Alert komponenty */
-    .stAlert {
-        border-radius: 12px !important;
-        border: none !important;
-        box-shadow: 0 2px 8px rgba(0,0,0,0.1) !important;
-    }
-    
-    /* Spacing pre mobile */
-    .mobile-spacing {
-        margin: 1.5rem 0;
-    }
-    
-    .mobile-title {
-        font-size: 1.8rem !important;
-        font-weight: 700 !important;
-        text-align: center !important;
-        margin-bottom: 1rem !important;
-        color: #2c3e50 !important;
-    }
-    
-    .mobile-subtitle {
-        font-size: 1.3rem !important;
-        font-weight: 600 !important;
-        margin: 1.5rem 0 1rem 0 !important;
-        color: #34495e !important;
-    }
-    
-    /* Responsívne stĺpce */
-    @media screen and (max-width: 768px) {
-        .stColumns {
-            flex-direction: column !important;
-        }
-        
-        .stColumn {
-            width: 100% !important;
-            margin-bottom: 1rem !important;
-        }
-    }
-    
-    /* Loading spinner */
-    .loading-spinner {
-        display: inline-block;
-        width: 20px;
-        height: 20px;
-        border: 3px solid rgba(255,255,255,.3);
-        border-radius: 50%;
-        border-top-color: #fff;
-        animation: spin 1s ease-in-out infinite;
-    }
-    
-    @keyframes spin {
-        to { transform: rotate(360deg); }
-    }
-    
-    /* Mobile info box */
-    .mobile-info {
-        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-        color: white;
-        padding: 1.5rem;
-        border-radius: 16px;
-        margin: 1rem 0;
-        text-align: center;
-        box-shadow: 0 4px 15px rgba(0,0,0,0.1);
-    }
-    
     /* Progress indicator */
     .progress-steps {
         display: flex;
@@ -725,9 +662,13 @@ def export_evaluations_to_csv(session_name=None):
 
 # Inicializácia session state pre admin mode
 if 'admin_mode' not in st.session_state:
-    st.session_state.admin_mode = False
+    st.session_state.admin_mode = True  # Začíname na admin
+
 if 'admin_authenticated' not in st.session_state:
     st.session_state.admin_authenticated = False
+
+if 'admin_session_token' not in st.session_state:
+    st.session_state.admin_session_token = None
 
 # Admin heslo v MD5 (consumertest24)
 ADMIN_PASSWORD_MD5 = hashlib.md5("consumertest24".encode()).hexdigest()
@@ -743,132 +684,56 @@ def verify_password(password, stored_hash):
 def generate_qr_code_url(url, size="200x200", error_correction="M"):
     """Generuje URL pre QR kód pomocou online služby s optimalizáciou pre vonkajšie podmienky"""
     encoded_url = urllib.parse.quote(url, safe='')
-    # Použitie väčšieho QR kódu s vyššou error correction pre lepšiu čitateľnosť vonku
     qr_api_url = f"https://api.qrserver.com/v1/create-qr-code/?size={size}&ecc={error_correction}&color=000000&bgcolor=ffffff&margin=2&data={encoded_url}"
     return qr_api_url
 
-def get_landing_page_css():
-    """CSS pre landing page s QR kódom"""
+def get_simple_landing_css():
+    """Minimalistický CSS pre landing page - len názov a QR kód"""
     return """
     <style>
-    .landing-container {
-        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+    .simple-landing {
+        background: #ffffff;
         min-height: 100vh;
         display: flex;
         flex-direction: column;
         align-items: center;
         justify-content: center;
         padding: 2rem;
-        color: white;
         text-align: center;
+        font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
     }
     
-    .landing-title {
+    .simple-title {
         font-size: 2.5rem;
-        font-weight: 800;
-        margin-bottom: 1rem;
-        text-shadow: 2px 2px 4px rgba(0,0,0,0.3);
+        font-weight: 700;
+        margin-bottom: 3rem;
+        color: #2c3e50;
     }
     
-    .landing-subtitle {
-        font-size: 1.3rem;
-        margin-bottom: 2rem;
-        opacity: 0.9;
-    }
-    
-    .qr-container {
+    .simple-qr {
         background: white;
         padding: 2rem;
         border-radius: 20px;
-        box-shadow: 0 10px 30px rgba(0,0,0,0.3);
-        margin: 2rem 0;
-        animation: pulse 2s infinite;
-    }
-    
-    @keyframes pulse {
-        0% { transform: scale(1); }
-        50% { transform: scale(1.05); }
-        100% { transform: scale(1); }
-    }
-    
-    .qr-instructions {
-        background: rgba(255,255,255,0.1);
-        backdrop-filter: blur(10px);
-        border-radius: 15px;
-        padding: 1.5rem;
-        margin-top: 2rem;
-        border: 1px solid rgba(255,255,255,0.2);
-    }
-    
-    .feature-grid {
-        display: grid;
-        grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
-        gap: 1.5rem;
-        margin-top: 2rem;
-        width: 100%;
-        max-width: 800px;
-    }
-    
-    .feature-card {
-        background: rgba(255,255,255,0.1);
-        backdrop-filter: blur(10px);
-        border-radius: 15px;
-        padding: 1.5rem;
-        border: 1px solid rgba(255,255,255,0.2);
-        transition: transform 0.3s ease;
-    }
-    
-    .feature-card:hover {
-        transform: translateY(-5px);
-    }
-    
-    .action-button {
-        background: linear-gradient(135deg, #ff6b6b, #ee5a24);
-        color: white;
-        padding: 1rem 2rem;
-        border: none;
-        border-radius: 50px;
-        font-size: 1.2rem;
-        font-weight: 600;
-        cursor: pointer;
-        transition: all 0.3s ease;
-        text-decoration: none;
-        display: inline-block;
-        margin: 1rem;
-        box-shadow: 0 4px 15px rgba(0,0,0,0.2);
-    }
-    
-    .action-button:hover {
-        transform: translateY(-2px);
-        box-shadow: 0 6px 20px rgba(0,0,0,0.3);
+        box-shadow: 0 4px 20px rgba(0,0,0,0.1);
+        border: 2px solid #e0e0e0;
     }
     
     @media (max-width: 768px) {
-        .landing-title {
+        .simple-title {
             font-size: 2rem;
         }
         
-        .landing-subtitle {
-            font-size: 1.1rem;
-        }
-        
-        .qr-container {
+        .simple-qr {
             padding: 1.5rem;
-            margin: 1.5rem 0;
-        }
-        
-        .feature-grid {
-            grid-template-columns: 1fr;
-            gap: 1rem;
         }
     }
     </style>
     """
 
-def landing_page_interface():
-    """Dedikovaná landing page pre QR kód"""
+def simple_landing_page():
+    """Jednoduchá landing page s len názvom a QR kódom"""
     
-    # Skryť sidebar úplne pre čistý vzhľad
+    # Skryť sidebar úplne
     st.markdown("""
     <style>
     .stSidebar {
@@ -880,29 +745,21 @@ def landing_page_interface():
     </style>
     """, unsafe_allow_html=True)
     
-    # Aplikuj CSS pre landing page
-    st.markdown(get_landing_page_css(), unsafe_allow_html=True)
+    # Aplikuj minimalistický CSS
+    st.markdown(get_simple_landing_css(), unsafe_allow_html=True)
     
     # Získanie aktuálneho stavu
     current_state = get_current_state()
     
     if not current_state['session_active']:
         st.markdown("""
-        <div class="landing-container">
-            <h1 class="landing-title">❌ Hodnotenie nie je aktívne</h1>
-            <p class="landing-subtitle">Kontaktujte administrátora pre aktiváciu</p>
+        <div class="simple-landing">
+            <h1 class="simple-title">❌ Hodnotenie nie je aktívne</h1>
         </div>
         """, unsafe_allow_html=True)
         return
     
     # Hlavná landing page
-    st.markdown(f"""
-    <div class="landing-container">
-        <h1 class="landing-title">🧪 {current_state['session_name']}</h1>
-        <p class="landing-subtitle">Naskenujte QR kód pre začiatok hodnotenia</p>
-    """, unsafe_allow_html=True)
-    
-    # Veľký QR kód optimalizovaný pre vonkajšie podmienky
     app_url = "https://consumervote.streamlit.app"
     evaluator_url = f"{app_url}?mode=evaluator&hide_sidebar=true"
     
@@ -910,116 +767,26 @@ def landing_page_interface():
     large_qr_url = generate_qr_code_url(evaluator_url, size="400x400", error_correction="H")
     
     st.markdown(f"""
-        <div class="qr-container">
+    <div class="simple-landing">
+        <h1 class="simple-title">{current_state['session_name']}</h1>
+        
+        <div class="simple-qr">
             <img src="{large_qr_url}" alt="QR kód pre hodnotenie" style="max-width: 100%; height: auto;" />
         </div>
-        
-        <div class="qr-instructions">
-            <h3>📱 Ako hodnotiť:</h3>
-            <p>1. Naskenujte QR kód fotoaparátom</p>
-            <p>2. Otvorte odkaz v prehliadači</p>
-            <p>3. Vyberte TOP 3 vzorky</p>
-            <p>4. Odošlite hodnotenie</p>
-        </div>
-    """, unsafe_allow_html=True)
-    
-    # Funkcie hodnotenia
-    st.markdown(f"""
-        <div class="feature-grid">
-            <div class="feature-card">
-                <h4>🏆 TOP 3 hodnotenie</h4>
-                <p>Vyberte len 3 najlepšie vzorky zo {current_state['samples_count']} možností</p>
-            </div>
-            
-            <div class="feature-card">
-                <h4>📱 Mobile optimalizované</h4>
-                <p>Perfektne funguje na mobilných zariadeniach</p>
-            </div>
-            
-            <div class="feature-card">
-                <h4>⚡ Rýchle hodnotenie</h4>
-                <p>Hodnotenie trvá len 2-3 minúty</p>
-            </div>
-            
-            <div class="feature-card">
-                <h4>🔒 Anonymné</h4>
-                <p>Zadáte len meno alebo prezývku</p>
-            </div>
-        </div>
-        
-        <a href="{evaluator_url}" class="action-button" target="_blank">
-            🔗 Alebo kliknite pre hodnotenie
-        </a>
-        
     </div>
     """, unsafe_allow_html=True)
 
-def get_sharing_qr_css():
-    """CSS pre sharing QR kód po hodnotení"""
-    return """
-    <style>
-    .sharing-container {
-        background: linear-gradient(135deg, #2ecc71, #27ae60);
-        color: white;
-        padding: 2rem;
-        border-radius: 20px;
-        text-align: center;
-        margin: 2rem 0;
-        box-shadow: 0 8px 25px rgba(0,0,0,0.15);
-    }
-    
-    .sharing-title {
-        font-size: 1.8rem;
-        font-weight: 700;
-        margin-bottom: 1rem;
-    }
-    
-    .sharing-qr {
-        background: white;
-        padding: 1.5rem;
-        border-radius: 15px;
-        display: inline-block;
-        margin: 1rem 0;
-        box-shadow: 0 4px 15px rgba(0,0,0,0.1);
-    }
-    
-    .sharing-instructions {
-        background: rgba(255,255,255,0.1);
-        backdrop-filter: blur(10px);
-        border-radius: 12px;
-        padding: 1.5rem;
-        margin-top: 1rem;
-        border: 1px solid rgba(255,255,255,0.2);
-    }
-    
-    .pulse-animation {
-        animation: qr-pulse 3s infinite;
-    }
-    
-    @keyframes qr-pulse {
-        0% { transform: scale(1); box-shadow: 0 4px 15px rgba(0,0,0,0.1); }
-        50% { transform: scale(1.05); box-shadow: 0 6px 20px rgba(0,0,0,0.2); }
-        100% { transform: scale(1); box-shadow: 0 4px 15px rgba(0,0,0,0.1); }
-    }
-    
-    .thank-you-emojis {
-        font-size: 3rem;
-        margin: 1rem 0;
-        animation: bounce 2s infinite;
-    }
-    
-    @keyframes bounce {
-        0%, 20%, 50%, 80%, 100% { transform: translateY(0); }
-        40% { transform: translateY(-10px); }
-        60% { transform: translateY(-5px); }
-    }
-    </style>
-    """
-
 def admin_login():
-    """Login formulár pre admin"""
-    st.title("🔐 Admin Login")
-    st.write("Zadajte heslo pre prístup k admin panelu:")
+    """Login formulár pre admin s persistent session"""
+    
+    # Kontrola existujúcej session
+    if st.session_state.admin_session_token:
+        if verify_admin_session(st.session_state.admin_session_token):
+            st.session_state.admin_authenticated = True
+            st.rerun()
+    
+    st.title("🔐 Admin Dashboard")
+    st.write("Zadajte heslo pre prístup k administrácii:")
     
     with st.form("admin_login_form"):
         password = st.text_input("Heslo:", type="password", placeholder="Zadajte admin heslo")
@@ -1027,470 +794,322 @@ def admin_login():
         
         if submitted:
             if verify_password(password, ADMIN_PASSWORD_MD5):
-                st.session_state.admin_authenticated = True
-                st.success("✅ Úspešne prihlásený!")
-                st.rerun()
+                # Vytvor persistent session
+                session_token = create_admin_session()
+                if session_token:
+                    st.session_state.admin_session_token = session_token
+                    st.session_state.admin_authenticated = True
+                    
+                    # Audit log
+                    log_audit_action(
+                        action_type="AUTH_LOGIN",
+                        action_description="Admin úspešne prihlásený",
+                        success=True
+                    )
+                    
+                    st.success("✅ Úspešne prihlásený!")
+                    st.rerun()
+                else:
+                    st.error("❌ Chyba pri vytváraní session!")
             else:
+                # Audit log pre neúspešné prihlásenie
+                log_audit_action(
+                    action_type="AUTH_LOGIN_FAILED",
+                    action_description="Neúspešný pokus o prihlásenie admina",
+                    success=False
+                )
                 st.error("❌ Nesprávne heslo!")
-                
-    # Debug info pre admin (odkomentuj ak potrebuješ)
-    with st.expander("🔧 Debug Info (len pre testovanie)"):
-        st.write("**Heslo:** consumertest24")
-        if st.button("Zobraziť MD5 hashe"):
-            st.code(f"Uložený MD5 hash: {ADMIN_PASSWORD_MD5}")
-            if 'password' in locals() and password:
-                st.code(f"Zadaný hash: {hash_password(password)}")
     
     st.divider()
     if st.button("👥 Prejsť na hodnotenie"):
         st.session_state.admin_mode = False
         st.rerun()
 
-def admin_interface():
-    """Admin rozhranie pre nastavenie hodnotenia"""
+def admin_dashboard():
+    """Admin dashboard rozhranie"""
     
     # Kontrola autentifikácie
     if not st.session_state.admin_authenticated:
         admin_login()
         return
     
+    # Overenie session tokenu
+    if not verify_admin_session(st.session_state.admin_session_token):
+        st.session_state.admin_authenticated = False
+        st.session_state.admin_session_token = None
+        st.error("⚠️ Session expirovala. Prihláste sa znovu.")
+        st.rerun()
+    
     # Získanie aktuálneho stavu
     current_state = get_current_state()
     
     # Header s možnosťou odhlásenia
-    col1, col2 = st.columns([3, 1])
+    col1, col2 = st.columns([4, 1])
     with col1:
-        st.title(f"🔧 Admin Panel - {current_state['session_name']}")
+        st.title("📊 Admin Dashboard")
     with col2:
-        if st.button("🚪 Odhlásiť sa"):
+        if st.button("🚪 Odhlásiť"):
+            destroy_admin_session(st.session_state.admin_session_token)
             st.session_state.admin_authenticated = False
+            st.session_state.admin_session_token = None
             st.rerun()
     
-    with st.container():
-        col1, col2 = st.columns([2, 1])
-        
-        with col1:
-            st.subheader("⚙️ Nastavenie hodnotenia")
-            
-            # Názov session/akcie
-            session_name = st.text_input(
-                "📋 Názov hodnotenia/akcie:",
-                value=current_state['session_name'],
-                placeholder="Napr. Hodnotenie chutnôs letnej ponuky 2024",
-                help="Tento názov sa zobrazí v title a pomôže identifikovať akciu"
-            )
-            
-            st.divider()
-            
-            # Počet vzoriek
-            samples_count = st.number_input(
-                "🧪 Počet vzoriek na hodnotenie:",
-                min_value=2,
-                max_value=20,
-                value=current_state['samples_count'] if current_state['samples_count'] > 0 else 3
-            )
-            
-            # Názvy vzoriek
-            st.write("**🏷️ Názvy vzoriek:**")
-            sample_names = []
-            
-            for i in range(samples_count):
-                name = st.text_input(
-                    f"Vzorka {i+1}:",
-                    value=current_state['samples_names'][i] if i < len(current_state['samples_names']) else f"Vzorka {i+1}",
-                    key=f"sample_name_{i}",
-                    placeholder=f"Napr. Jogurt jahoda, Pivo svetlé, atď."
-                )
-                sample_names.append(name)
-            
-            # Tlačidlá
-            col_btn1, col_btn2, col_btn3 = st.columns(3)
-            
-            with col_btn1:
-                if st.button("💾 Uložiť nastavenia", type="primary"):
-                    if save_evaluation_settings(session_name, samples_count, sample_names, True):
-                        st.success("✅ Nastavenia uložené do databázy!")
-                        st.rerun()
-                    else:
-                        st.error("❌ Chyba pri ukladaní!")
-            
-            with col_btn2:
-                if st.button("🔄 Reset hodnotení"):
-                    if clear_evaluations_for_session(current_state['session_name']):
-                        st.success("✅ Hodnotenia vymazané z databázy!")
-                        st.rerun()
-                    else:
-                        st.error("❌ Chyba pri mazaní!")
-            
-            with col_btn3:
-                if st.button("👥 Prepnúť na hodnotenie"):
-                    st.session_state.admin_mode = False
-                    st.rerun()
-        
-        with col2:
-            if current_state['session_active']:
-                st.subheader("📱 QR kód pre hodnotiteľov")
-                
-                # URL aplikácie na Streamlit Cloud - odkaz na landing page
-                app_url = "https://consumervote.streamlit.app"
-                landing_url = f"{app_url}?mode=landing&hide_sidebar=true"
-                
-                # Generovanie QR kódu s optimalizáciou pre vonkajšie podmienky
-                qr_image_url = generate_qr_code_url(landing_url, size="250x250", error_correction="H")
-                
-                # Kontajner pre QR kód
-                st.markdown("""
-                <div style="background: white; padding: 1rem; border-radius: 12px; text-align: center; margin: 1rem 0; box-shadow: 0 4px 12px rgba(0,0,0,0.1);">
-                """, unsafe_allow_html=True)
-                
-                st.image(qr_image_url, caption="QR kód pre hodnotenie (optimalizovaný pre vonkajšie podmienky)", width=250)
-                
-                st.markdown("</div>", unsafe_allow_html=True)
-                
-                # Tlačidlá pre admin
-                col_btn1, col_btn2 = st.columns(2)
-                
-                with col_btn1:
-                    # Tlačidlo na otvorenie landing page
-                    st.markdown(f"""
-                    <a href="{landing_url}" target="_blank" style="
-                        display: inline-block;
-                        padding: 0.5rem 1rem;
-                        background-color: #2ecc71;
-                        color: white;
-                        text-decoration: none;
-                        border-radius: 0.5rem;
-                        margin: 0.5rem 0;
-                        text-align: center;
-                        width: 100%;
-                        box-sizing: border-box;
-                    ">🖼️ Otvoriť landing page</a>
-                    """, unsafe_allow_html=True)
-                
-                with col_btn2:
-                    # Tlačidlo na priamy vstup do hodnotenia
-                    evaluator_url = f"{app_url}?mode=evaluator&hide_sidebar=true"
-                    st.markdown(f"""
-                    <a href="{evaluator_url}" target="_blank" style="
-                        display: inline-block;
-                        padding: 0.5rem 1rem;
-                        background-color: #ff6b6b;
-                        color: white;
-                        text-decoration: none;
-                        border-radius: 0.5rem;
-                        margin: 0.5rem 0;
-                        text-align: center;
-                        width: 100%;
-                        box-sizing: border-box;
-                    ">🔗 Priame hodnotenie</a>
-                    """, unsafe_allow_html=True)
-                
-                # Informácie o QR kóde
-                st.info("""
-                **💡 QR kód vedie na landing page s:**
-                - Veľký, čitateľný QR kód aj za slnka
-                - Inštrukcie pre hodnotiteľov  
-                - Prehľad funkcií aplikácie
-                - Priamy odkaz na hodnotenie
-                """)
-                
-                # URL pre kopírovanie
-                with st.expander("📋 URL pre kopírovanie"):
-                    st.code(landing_url, language="text")
-                    st.caption("Landing page - ideálne pre zdieľanie")
-                    st.code(evaluator_url, language="text") 
-                    st.caption("Priame hodnotenie - pre pokročilých")
-    
-    # Zobrazenie aktuálnych nastavení
-    if current_state['session_active']:
-        st.divider()
-        st.subheader("📊 Aktuálne nastavenia")
-        
-        # Session info
-        st.info(f"📋 **Aktuálna session:** {current_state['session_name']}")
-        
-        # Získanie device stats
-        device_stats = get_device_stats(current_state['session_name'])
-        
-        col1, col2, col3, col4 = st.columns(4)
-        with col1:
-            st.metric("Počet vzoriek", current_state['samples_count'])
-        with col2:
-            st.metric("Počet hodnotení", len(current_state['evaluations']))
-        with col3:
-            st.metric("Jedinečné zariadenia", device_stats['unique_devices'])
-        with col4:
-            # Veľkosť databázy
-            try:
-                db_size = os.path.getsize("consumervote.db") / 1024  # KB
-                st.metric("Veľkosť DB", f"{db_size:.1f} KB")
-            except:
-                st.metric("Veľkosť DB", "N/A")
-        
-        # Device tracking info
-        if device_stats['unique_devices'] > 0:
-            with st.expander("📱 Device tracking informácie"):
-                st.write(f"**Jedinečné zariadenia:** {device_stats['unique_devices']}")
-                st.write(f"**Celkové hodnotenia:** {device_stats['total_evaluations']}")
-                if device_stats['last_activity']:
-                    st.write(f"**Posledná aktivita:** {device_stats['last_activity']}")
-                
-                # Možnosť reset device tracking
-                if st.button("🔄 Reset device tracking", help="Vymaže obmedzenia zariadení - všetky zariadenia budú môcť hodnotiť znovu"):
-                    conn = sqlite3.connect("consumervote.db")
-                    cursor = conn.cursor()
-                    try:
-                        cursor.execute('DELETE FROM device_tracking WHERE session_name = ?', (current_state['session_name'],))
-                        conn.commit()
-                        st.success("✅ Device tracking resetovaný!")
-                        st.rerun()
-                    except Exception as e:
-                        st.error(f"❌ Chyba: {e}")
-                    finally:
-                        conn.close()
-        
-        # Zoznam vzoriek
-        st.write("**🧪 Vzorky na hodnotenie:**")
-        for i, name in enumerate(current_state['samples_names']):
-            st.write(f"{i+1}. {name}")
-    
-    # Zobrazenie výsledkov
-    if current_state['evaluations']:
-        st.divider()
-        st.subheader("📈 Výsledky hodnotenia")
-        
-        # Export tlačidlá
-        col1, col2 = st.columns(2)
-        with col1:
-            if st.button("📥 Exportovať aktuálnu session (CSV)"):
-                df = export_evaluations_to_csv(current_state['session_name'])
-                if not df.empty:
-                    csv = df.to_csv(index=False)
-                    st.download_button(
-                        label="Stiahnuť CSV aktuálnej session",
-                        data=csv,
-                        file_name=f"hodnotenia_{current_state['session_name'].replace(' ', '_')}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv",
-                        mime="text/csv"
-                    )
-        
-        with col2:
-            if st.button("🗄️ Exportovať všetky sessions (CSV)"):
-                df = export_evaluations_to_csv()
-                if not df.empty:
-                    csv = df.to_csv(index=False)
-                    st.download_button(
-                        label="Stiahnuť CSV všetkých sessions",
-                        data=csv,
-                        file_name=f"hodnotenia_vsetky_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv",
-                        mime="text/csv"
-                    )
-        
-        # Základné zobrazenie
-        st.write("**Posledných 10 hodnotení:**")
-        df_display = pd.DataFrame(current_state['evaluations'][-10:])
-        st.dataframe(df_display, use_container_width=True)
-
-def audit_interface():
-    """Rozhranie pre zobrazenie audit logov"""
-    
-    st.subheader("📋 Audit Log - História aktivít")
-    
-    # Audit štatistiky
-    stats = get_audit_statistics()
+    # Dashboard metriky
+    device_stats = get_device_stats(current_state['session_name'])
     
     col1, col2, col3, col4 = st.columns(4)
     with col1:
-        st.metric("Celkom akcií", stats['total_actions'])
+        st.metric(
+            "📋 Session Status", 
+            "✅ Aktívna" if current_state['session_active'] else "❌ Neaktívna",
+            current_state['session_name']
+        )
     with col2:
-        st.metric("Úspešnosť", f"{stats['success_rate']:.1f}%")
+        st.metric("🧪 Vzorky", current_state['samples_count'])
     with col3:
-        if stats['last_activity']:
-            last_activity = datetime.strptime(stats['last_activity'], '%Y-%m-%d %H:%M:%S')
-            time_ago = datetime.now() - last_activity
-            if time_ago.days > 0:
-                time_str = f"{time_ago.days}d"
-            elif time_ago.seconds > 3600:
-                time_str = f"{time_ago.seconds//3600}h"
-            else:
-                time_str = f"{time_ago.seconds//60}m"
-            st.metric("Posledná aktivita", time_str)
-        else:
-            st.metric("Posledná aktivita", "N/A")
+        st.metric("📝 Hodnotenia", len(current_state['evaluations']))
     with col4:
-        admin_session_id, _ = get_admin_session_info()
-        st.metric("Session ID", admin_session_id[-8:])
+        st.metric("📱 Zariadenia", device_stats['unique_devices'])
     
-    # Filtre pre audit logy
-    st.markdown("### 🔍 Filtre")
-    col1, col2, col3 = st.columns(3)
+    st.divider()
     
-    with col1:
-        action_filter = st.selectbox(
-            "Typ akcie:",
-            options=['Všetky', 'AUTH_LOGIN', 'AUTH_LOGIN_FAILED', 'SETTINGS_UPDATE', 'DATA_DELETE', 'EVALUATION_SUBMIT'],
-            key="audit_action_filter"
-        )
-    
-    with col2:
-        # Získanie dostupných session names
-        current_state = get_current_state()
-        session_options = ['Všetky sessions']
-        if current_state['session_name']:
-            session_options.append(current_state['session_name'])
-        
-        session_filter = st.selectbox(
-            "Session:",
-            options=session_options,
-            key="audit_session_filter"
-        )
-    
-    with col3:
-        limit = st.number_input(
-            "Počet záznamov:",
-            min_value=10,
-            max_value=200,
-            value=50,
-            step=10,
-            key="audit_limit"
-        )
-    
-    # Získanie audit logov s filtrami
-    action_type = None if action_filter == 'Všetky' else action_filter
-    session_name = None if session_filter == 'Všetky sessions' else session_filter
-    
-    audit_logs = get_audit_logs(limit=limit, action_type=action_type, session_name=session_name)
-    
-    if audit_logs:
-        st.markdown("### 📊 Audit záznamy")
-        
-        # Vytvorenie DataFrame pre lepšie zobrazenie
-        audit_data = []
-        for log in audit_logs:
-            timestamp, admin_session_id, admin_ip, action_type, action_description, session_name, old_values, new_values, affected_records, success, error_message = log
-            
-            audit_data.append({
-                'Čas': timestamp,
-                'Admin Session': admin_session_id[-8:] if admin_session_id else 'N/A',
-                'IP': admin_ip,
-                'Akcia': action_type,
-                'Popis': action_description,
-                'Session': session_name or 'N/A',
-                'Záznamy': affected_records,
-                'Úspech': '✅' if success else '❌',
-                'Chyba': error_message or ''
-            })
-        
-        df = pd.DataFrame(audit_data)
-        
-        # Zobrazenie tabuľky
-        st.dataframe(df, use_container_width=True, height=400)
-        
-        # Export audit logov
-        col1, col2 = st.columns(2)
+    # Hlavné ovládanie
+    if current_state['session_active']:
+        col1, col2 = st.columns([2, 1])
         
         with col1:
-            if st.button("📥 Export audit logov (CSV)"):
-                csv = df.to_csv(index=False)
-                st.download_button(
-                    label="Stiahnuť CSV",
-                    data=csv,
-                    file_name=f"audit_log_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv",
-                    mime="text/csv"
-                )
+            st.subheader("🔗 QR kód pre hodnotiteľov")
+            
+            # URL aplikácie
+            app_url = "https://consumervote.streamlit.app"
+            landing_url = f"{app_url}?mode=landing&hide_sidebar=true"
+            
+            # QR kód
+            qr_image_url = generate_qr_code_url(landing_url, size="300x300", error_correction="H")
+            
+            col_qr1, col_qr2, col_qr3 = st.columns([1, 2, 1])
+            with col_qr2:
+                st.image(qr_image_url, width=300)
+            
+            # Akčné tlačidlá
+            col_btn1, col_btn2 = st.columns(2)
+            
+            with col_btn1:
+                st.markdown(f"""
+                <a href="{landing_url}" target="_blank" style="
+                    display: inline-block;
+                    padding: 0.75rem 1.5rem;
+                    background-color: #2ecc71;
+                    color: white;
+                    text-decoration: none;
+                    border-radius: 8px;
+                    font-weight: 600;
+                    text-align: center;
+                    width: 100%;
+                    box-sizing: border-box;
+                ">🖼️ Otvoriť Landing Page</a>
+                """, unsafe_allow_html=True)
+            
+            with col_btn2:
+                evaluator_url = f"{app_url}?mode=evaluator&hide_sidebar=true"
+                st.markdown(f"""
+                <a href="{evaluator_url}" target="_blank" style="
+                    display: inline-block;
+                    padding: 0.75rem 1.5rem;
+                    background-color: #3498db;
+                    color: white;
+                    text-decoration: none;
+                    border-radius: 8px;
+                    font-weight: 600;
+                    text-align: center;
+                    width: 100%;
+                    box-sizing: border-box;
+                ">📱 Priame Hodnotenie</a>
+                """, unsafe_allow_html=True)
         
         with col2:
-            if st.button("🗑️ Vyčistiť staré audit logy (>30 dní)"):
-                conn = sqlite3.connect("consumervote.db")
-                cursor = conn.cursor()
-                try:
-                    cursor.execute('''
-                        DELETE FROM audit_log 
-                        WHERE timestamp < datetime('now', '-30 days')
-                    ''')
-                    deleted_count = cursor.rowcount
-                    conn.commit()
-                    
-                    # Log čistenia auditov
-                    log_audit_action(
-                        action_type="AUDIT_CLEANUP",
-                        action_description=f"Vyčistené staré audit logy (vymazaných {deleted_count} záznamov)",
-                        affected_records=deleted_count,
-                        success=True
-                    )
-                    
-                    st.success(f"✅ Vymazaných {deleted_count} starých audit záznamov")
+            st.subheader("⚙️ Rýchle akcie")
+            
+            if st.button("🔄 Reset hodnotení", use_container_width=True):
+                if clear_evaluations_for_session(current_state['session_name']):
+                    st.success("✅ Hodnotenia vymazané!")
                     st.rerun()
-                except Exception as e:
-                    st.error(f"❌ Chyba pri čistení: {e}")
-                finally:
-                    conn.close()
-        
-        # Detailné zobrazenie vybraného záznamu
-        if st.checkbox("🔍 Zobraziť detaily záznamov"):
-            for i, log in enumerate(audit_logs[:10]):  # Zobraz len prvých 10 pre performance
-                timestamp, admin_session_id, admin_ip, action_type, action_description, session_name, old_values, new_values, affected_records, success, error_message = log
-                
-                with st.expander(f"{timestamp} - {action_type} {'✅' if success else '❌'}"):
-                    col1, col2 = st.columns(2)
-                    
-                    with col1:
-                        st.write(f"**Admin Session:** {admin_session_id}")
-                        st.write(f"**IP Adresa:** {admin_ip}")
-                        st.write(f"**Typ akcie:** {action_type}")
-                        st.write(f"**Ovplyvnené záznamy:** {affected_records}")
-                    
-                    with col2:
-                        st.write(f"**Session:** {session_name or 'N/A'}")
-                        st.write(f"**Úspech:** {'✅ Áno' if success else '❌ Nie'}")
-                        if error_message:
-                            st.error(f"**Chyba:** {error_message}")
-                    
-                    st.write(f"**Popis:** {action_description}")
-                    
-                    if old_values:
-                        try:
-                            old_data = json.loads(old_values)
-                            st.json({"Staré hodnoty": old_data})
-                        except:
-                            st.text(f"Staré hodnoty: {old_values}")
-                    
-                    if new_values:
-                        try:
-                            new_data = json.loads(new_values)
-                            st.json({"Nové hodnoty": new_data})
-                        except:
-                            st.text(f"Nové hodnoty: {new_values}")
+                else:
+                    st.error("❌ Chyba pri mazaní!")
+            
+            if st.button("⏹️ Zastaviť hodnotenie", use_container_width=True):
+                if save_evaluation_settings(current_state['session_name'], current_state['samples_count'], current_state['samples_names'], False):
+                    st.success("✅ Hodnotenie zastavené!")
+                    st.rerun()
+                else:
+                    st.error("❌ Chyba!")
+            
+            if st.button("👥 Prejsť na hodnotenie", use_container_width=True):
+                st.session_state.admin_mode = False
+                st.rerun()
     
     else:
-        st.info("📝 Žiadne audit záznamy neboli nájdené pre zadané filtre")
+        st.warning("⚠️ Hodnotenie nie je aktívne. Nastavte ho v sekcii Nastavenia.")
     
-    # Najpopulárnejšie akcie
-    if stats['popular_actions']:
-        st.markdown("### 📈 Najčastejšie akcie")
-        popular_df = pd.DataFrame(stats['popular_actions'], columns=['Typ akcie', 'Počet'])
-        st.bar_chart(popular_df.set_index('Typ akcie'))
+    # Expandable sekcie
+    with st.expander("⚙️ Nastavenia hodnotenia", expanded=not current_state['session_active']):
+        admin_settings_section(current_state)
+    
+    with st.expander("📊 Výsledky a export"):
+        admin_results_section(current_state)
+    
+    with st.expander("🔧 Systémové informácie"):
+        admin_system_section(current_state, device_stats)
+
+def admin_settings_section(current_state):
+    """Sekcia nastavení v dashboarde"""
+    
+    # Názov session/akcie
+    session_name = st.text_input(
+        "📋 Názov hodnotenia/akcie:",
+        value=current_state['session_name'],
+        placeholder="Napr. Hodnotenie letnej ponuky 2024"
+    )
+    
+    # Počet vzoriek
+    samples_count = st.number_input(
+        "🧪 Počet vzoriek:",
+        min_value=2,
+        max_value=20,
+        value=current_state['samples_count'] if current_state['samples_count'] > 0 else 3
+    )
+    
+    # Názvy vzoriek
+    st.write("**🏷️ Názvy vzoriek:**")
+    sample_names = []
+    
+    for i in range(samples_count):
+        name = st.text_input(
+            f"Vzorka {i+1}:",
+            value=current_state['samples_names'][i] if i < len(current_state['samples_names']) else f"Vzorka {i+1}",
+            key=f"sample_name_{i}",
+            placeholder=f"Napr. Jogurt jahoda, Pivo svetlé, atď."
+        )
+        sample_names.append(name)
+    
+    # Tlačidlá
+    col1, col2 = st.columns(2)
+    
+    with col1:
+        if st.button("💾 Uložiť a Spustiť", type="primary", use_container_width=True):
+            if save_evaluation_settings(session_name, samples_count, sample_names, True):
+                st.success("✅ Nastavenia uložené a hodnotenie spustené!")
+                st.rerun()
+            else:
+                st.error("❌ Chyba pri ukladaní!")
+    
+    with col2:
+        if st.button("💾 Uložiť bez spustenia", use_container_width=True):
+            if save_evaluation_settings(session_name, samples_count, sample_names, False):
+                st.success("✅ Nastavenia uložené!")
+                st.rerun()
+            else:
+                st.error("❌ Chyba pri ukladaní!")
+
+def admin_results_section(current_state):
+    """Sekcia výsledkov v dashboarde"""
+    
+    if not current_state['evaluations']:
+        st.info("📝 Zatiaľ žiadne hodnotenia")
+        return
+    
+    # Export tlačidlá
+    col1, col2 = st.columns(2)
+    with col1:
+        if st.button("📥 Export CSV (aktuálna session)", use_container_width=True):
+            df = export_evaluations_to_csv(current_state['session_name'])
+            if not df.empty:
+                csv = df.to_csv(index=False)
+                st.download_button(
+                    label="⬇️ Stiahnuť CSV",
+                    data=csv,
+                    file_name=f"hodnotenia_{current_state['session_name'].replace(' ', '_')}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv",
+                    mime="text/csv",
+                    use_container_width=True
+                )
+    
+    with col2:
+        if st.button("📥 Export CSV (všetky sessions)", use_container_width=True):
+            df = export_evaluations_to_csv()
+            if not df.empty:
+                csv = df.to_csv(index=False)
+                st.download_button(
+                    label="⬇️ Stiahnuť všetky CSV",
+                    data=csv,
+                    file_name=f"hodnotenia_vsetky_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv",
+                    mime="text/csv",
+                    use_container_width=True
+                )
+    
+    # Zobrazenie posledných hodnotení
+    st.write("**📋 Posledných 10 hodnotení:**")
+    df_display = pd.DataFrame(current_state['evaluations'][-10:])
+    st.dataframe(df_display, use_container_width=True)
+
+def admin_system_section(current_state, device_stats):
+    """Sekcia systémových informácií v dashboarde"""
+    
+    col1, col2 = st.columns(2)
+    
+    with col1:
+        st.write("**📊 Session informácie:**")
+        st.write(f"• Názov: {current_state['session_name']}")
+        st.write(f"• Status: {'✅ Aktívna' if current_state['session_active'] else '❌ Neaktívna'}")
+        st.write(f"• Vzorky: {current_state['samples_count']}")
+        st.write(f"• Hodnotenia: {len(current_state['evaluations'])}")
+        
+        if device_stats['last_activity']:
+            st.write(f"• Posledná aktivita: {device_stats['last_activity']}")
+    
+    with col2:
+        st.write("**🗄️ Databáza:**")
+        try:
+            if os.path.exists("consumervote.db"):
+                db_size = os.path.getsize("consumervote.db") / 1024
+                st.write(f"• Veľkosť: {db_size:.1f} KB")
+                st.write("• Status: ✅ Pripojená")
+            else:
+                st.write("• Status: ⚠️ Inicializuje sa...")
+        except:
+            st.write("• Status: ❌ Problém")
+        
+        st.write(f"• Jedinečné zariadenia: {device_stats['unique_devices']}")
+        st.write(f"• Celkové hodnotenia: {device_stats['total_evaluations']}")
+    
+    # Reset device tracking
+    if device_stats['unique_devices'] > 0:
+        if st.button("🔄 Reset zariadení (umožní opätovné hodnotenie)", use_container_width=True):
+            conn = sqlite3.connect("consumervote.db")
+            cursor = conn.cursor()
+            try:
+                cursor.execute('DELETE FROM device_tracking WHERE session_name = ?', (current_state['session_name'],))
+                conn.commit()
+                st.success("✅ Device tracking resetovaný!")
+                st.rerun()
+            except Exception as e:
+                st.error(f"❌ Chyba: {e}")
+            finally:
+                conn.close()
 
 def evaluator_interface():
     """Mobile-first rozhranie pre hodnotiteľov"""
     
     # Aplikuj mobile CSS
     st.markdown(get_mobile_css(), unsafe_allow_html=True)
-    # Aplikuj sharing CSS
-    st.markdown(get_sharing_qr_css(), unsafe_allow_html=True)
     
     # Získanie aktuálneho stavu
     current_state = get_current_state()
     
     # Mobile optimalizovaný title
-    st.markdown(f'<h1 class="mobile-title">🧪 {current_state["session_name"]}</h1>', unsafe_allow_html=True)
+    st.markdown(f'<h1 style="font-size: 1.8rem; font-weight: 700; text-align: center; margin-bottom: 1rem; color: #2c3e50;">🧪 {current_state["session_name"]}</h1>', unsafe_allow_html=True)
     
     if not current_state['session_active']:
-        st.markdown("""
-        <div class="mobile-info">
-            <h3>❌ Hodnotenie nie je aktívne</h3>
-            <p>Kontaktujte administrátora pre aktiváciu hodnotenia</p>
-        </div>
-        """, unsafe_allow_html=True)
+        st.error("❌ Hodnotenie nie je aktívne. Kontaktujte administrátora.")
         return
     
     # Kontrola device limitu
@@ -1500,14 +1119,7 @@ def evaluator_interface():
     )
     
     if not can_evaluate:
-        st.markdown(f"""
-        <div class="mobile-info">
-            <h3>⏰ Príliš skoré hodnotenie</h3>
-            <p>{message}</p>
-            <small>Každé zariadenie môže hodnotiť len raz za hodinu</small>
-        </div>
-        """, unsafe_allow_html=True)
-        
+        st.warning(f"⏰ {message}")
         if eval_count > 0:
             st.info(f"✅ Z tohto zariadenia už bolo odoslaných {eval_count} hodnotení")
         return
@@ -1537,132 +1149,44 @@ def evaluator_interface():
     
     # Ak bolo hodnotenie úspešne odoslané
     if st.session_state.evaluation_submitted:
-        
-        # Aplikuj CSS pre sharing
-        st.markdown(get_sharing_qr_css(), unsafe_allow_html=True)
-        
-        # Ďakovná správa s QR kódom pre sharing
-        app_url = "https://consumervote.streamlit.app"
-        landing_url = f"{app_url}?mode=landing&hide_sidebar=true"
-        
-        # QR kód pre sharing - stredná veľkosť, odkazuje na landing page
-        sharing_qr_url = generate_qr_code_url(landing_url, size="300x300", error_correction="H")
-        
-        st.markdown(f"""
-        <div class="sharing-container">
-            <div class="thank-you-emojis">🎉 🙏 ✨</div>
-            <h2 class="sharing-title">Ďakujeme za hodnotenie!</h2>
-            <p>Váš názor je pre nás veľmi dôležitý</p>
-            
-            <div class="sharing-qr pulse-animation">
-                <img src="{sharing_qr_url}" alt="QR kód pre zdieľanie" style="max-width: 100%; height: auto;" />
-            </div>
-            
-            <div class="sharing-instructions">
-                <h4>📱 Zdieľajte s priateľmi!</h4>
-                <p><strong>Ukážte tento QR kód ostatným</strong> - môžu si ho naskenovať z vašej obrazovky</p>
-                <p>💡 QR kód funguje aj za denného svetla</p>
-                <p>🔄 Stačí jeden scan a môžu hodnotiť aj oni</p>
-            </div>
-        </div>
-        """, unsafe_allow_html=True)
-        
+        st.success("🎉 Ďakujeme za hodnotenie!")
         st.balloons()
         
-        # Tlačidlá pre akcie
-        col1, col2 = st.columns(2)
-        
-        with col1:
-            if st.button("🔄 Nové hodnotenie", type="primary", key="new_eval_btn", help="Začať nové hodnotenie"):
-                st.session_state.evaluation_submitted = False
-                st.session_state.show_confirmation = False
-                st.rerun()
-        
-        with col2:
-            # Odkaz na landing page
-            st.markdown(f"""
-            <a href="{landing_url}" target="_blank" style="
-                display: inline-block;
-                padding: 0.75rem 1.5rem;
-                background-color: #3498db;
-                color: white;
-                text-decoration: none;
-                border-radius: 12px;
-                font-weight: 600;
-                text-align: center;
-                width: 100%;
-                box-sizing: border-box;
-                margin-top: 0.5rem;
-            ">🖼️ Otvoriť landing page</a>
-            """, unsafe_allow_html=True)
+        if st.button("🔄 Nové hodnotenie", type="primary"):
+            st.session_state.evaluation_submitted = False
+            st.session_state.show_confirmation = False
+            st.rerun()
         
         return
     
     # Krok 1: Hlavný formulár
     if not st.session_state.show_confirmation:
         
-        # Inštrukcie
-        st.markdown("""
-        <div class="mobile-info">
-            <h4>📝 Inštrukcie</h4>
-            <p>Vyberte TOP 3 vzorky v poradí od najlepšej po tretiu najlepšiu</p>
-            <small>💡 Zvyšné vzorky budú automaticky označené ako neklasifikované</small>
-        </div>
-        """, unsafe_allow_html=True)
-        
-        st.markdown('<div class="mobile-spacing"></div>', unsafe_allow_html=True)
+        st.info("📝 Vyberte TOP 3 vzorky v poradí od najlepšej po tretiu najlepšiu")
         
         # Meno hodnotiteľa
-        st.markdown('<h3 class="mobile-subtitle">👤 Vaše meno</h3>', unsafe_allow_html=True)
-        evaluator_name = st.text_input(
-            "", 
-            placeholder="Zadajte vaše meno alebo prezývku",
-            key="eval_name_input",
-            label_visibility="collapsed"
-        )
+        st.subheader("👤 Vaše meno")
+        evaluator_name = st.text_input("", placeholder="Zadajte vaše meno alebo prezývku", label_visibility="collapsed")
         
-        st.markdown('<div class="mobile-spacing"></div>', unsafe_allow_html=True)
-        
-        # TOP 3 výber s mobilnými kartami
-        st.markdown('<h3 class="mobile-subtitle">🏆 TOP 3 vzorky</h3>', unsafe_allow_html=True)
+        st.subheader("🏆 TOP 3 vzorky")
         
         # 1. miesto
-        st.markdown("### 🥇 1. miesto - Najlepšia vzorka")
-        first_place = st.selectbox(
-            "",
-            options=['Vyberte vzorku...'] + current_state['samples_names'],
-            key="first_place_select",
-            label_visibility="collapsed"
-        )
+        st.markdown("### 🥇 1. miesto")
+        first_place = st.selectbox("", options=['Vyberte vzorku...'] + current_state['samples_names'], key="first_place_select", label_visibility="collapsed")
         if first_place == 'Vyberte vzorku...':
             first_place = None
         
-        st.markdown('<div class="mobile-spacing"></div>', unsafe_allow_html=True)
-        
         # 2. miesto
-        st.markdown("### 🥈 2. miesto - Druhá najlepšia")
+        st.markdown("### 🥈 2. miesto")
         available_for_second = [s for s in current_state['samples_names'] if s != first_place]
-        second_place = st.selectbox(
-            "",
-            options=['Vyberte vzorku...'] + available_for_second,
-            key="second_place_select",
-            label_visibility="collapsed"
-        )
+        second_place = st.selectbox("", options=['Vyberte vzorku...'] + available_for_second, key="second_place_select", label_visibility="collapsed")
         if second_place == 'Vyberte vzorku...':
             second_place = None
         
-        st.markdown('<div class="mobile-spacing"></div>', unsafe_allow_html=True)
-        
         # 3. miesto
-        st.markdown("### 🥉 3. miesto - Tretia najlepšia")
-        available_for_third = [s for s in current_state['samples_names'] 
-                              if s != first_place and s != second_place]
-        third_place = st.selectbox(
-            "",
-            options=['Vyberte vzorku...'] + available_for_third,
-            key="third_place_select",
-            label_visibility="collapsed"
-        )
+        st.markdown("### 🥉 3. miesto")
+        available_for_third = [s for s in current_state['samples_names'] if s != first_place and s != second_place]
+        third_place = st.selectbox("", options=['Vyberte vzorku...'] + available_for_third, key="third_place_select", label_visibility="collapsed")
         if third_place == 'Vyberte vzorku...':
             third_place = None
         
@@ -1675,39 +1199,19 @@ def evaluator_interface():
         if third_place:
             selected_samples['3'] = third_place
         
-        # Zobrazenie súhrnu ak niečo vybral
+        # Zobrazenie súhrnu
         if selected_samples:
-            st.markdown('<div class="mobile-spacing"></div>', unsafe_allow_html=True)
-            st.markdown('<h3 class="mobile-subtitle">📋 Váš aktuálny výber</h3>', unsafe_allow_html=True)
-            
+            st.subheader("📋 Váš výber")
             for place, sample in selected_samples.items():
                 medal = "🥇" if place == "1" else "🥈" if place == "2" else "🥉"
                 st.success(f"{medal} **{place}. miesto**: {sample}")
-            
-            # Zostávajúce vzorky
-            remaining = [s for s in current_state['samples_names'] 
-                        if s not in selected_samples.values()]
-            if remaining:
-                with st.expander("📝 Neklasifikované vzorky"):
-                    for sample in remaining:
-                        st.write(f"• {sample}")
-        
-        st.markdown('<div class="mobile-spacing"></div>', unsafe_allow_html=True)
         
         # Komentár
-        st.markdown('<h3 class="mobile-subtitle">💬 Komentár (voliteľný)</h3>', unsafe_allow_html=True)
-        comment = st.text_area(
-            "", 
-            placeholder="Váš komentár k hodnoteniu, poznámky, návrhy na zlepšenie...",
-            key="eval_comment_input",
-            label_visibility="collapsed",
-            height=120
-        )
-        
-        st.markdown('<div class="mobile-spacing"></div>', unsafe_allow_html=True)
+        st.subheader("💬 Komentár (voliteľný)")
+        comment = st.text_area("", placeholder="Váš komentár k hodnoteniu...", label_visibility="collapsed", height=100)
         
         # Tlačidlo pokračovať
-        if st.button("📤 Pokračovať na kontrolu", type="primary", key="continue_btn", use_container_width=True):
+        if st.button("📤 Pokračovať na kontrolu", type="primary", use_container_width=True):
             if not evaluator_name.strip():
                 st.error("❌ Prosím zadajte vaše meno!")
             elif not selected_samples:
@@ -1727,19 +1231,11 @@ def evaluator_interface():
     
     # Krok 2: Potvrdzovacie okno
     else:
-        st.markdown('<h3 class="mobile-subtitle">✅ Kontrola hodnotenia</h3>', unsafe_allow_html=True)
+        st.subheader("✅ Kontrola hodnotenia")
         
         temp_eval = st.session_state.temp_evaluation
         
-        # Prehľadné zobrazenie pre mobile
-        st.markdown(f"""
-        <div class="mobile-info">
-            <h4>👤 {temp_eval['evaluator_name']}</h4>
-            <p><strong>Session:</strong> {temp_eval['session_name']}</p>
-        </div>
-        """, unsafe_allow_html=True)
-        
-        st.markdown('<div class="mobile-spacing"></div>', unsafe_allow_html=True)
+        st.info(f"👤 **{temp_eval['evaluator_name']}** - {temp_eval['session_name']}")
         
         # Výsledky hodnotenia
         for place, sample in temp_eval['selected_samples'].items():
@@ -1754,16 +1250,13 @@ def evaluator_interface():
             """, unsafe_allow_html=True)
         
         if temp_eval['comment']:
-            st.markdown('<div class="mobile-spacing"></div>', unsafe_allow_html=True)
             st.info(f"**Komentár:** {temp_eval['comment']}")
         
-        st.markdown('<div class="mobile-spacing"></div>', unsafe_allow_html=True)
-        
-        # Akčné tlačidlá pre mobile
+        # Akčné tlačidlá
         col1, col2 = st.columns(2)
         
         with col1:
-            if st.button("✅ Potvrdiť", type="primary", key="confirm_btn", use_container_width=True):
+            if st.button("✅ Potvrdiť", type="primary", use_container_width=True):
                 # Príprava dát
                 evaluation_data = {}
                 for sample_name in current_state['samples_names']:
@@ -1777,19 +1270,9 @@ def evaluator_interface():
                         evaluation_data[f'poradie_{sample_name}'] = 999
                 
                 # Uloženie do databázy
-                if save_evaluation(
-                    temp_eval['session_name'],
-                    temp_eval['evaluator_name'], 
-                    evaluation_data, 
-                    temp_eval['comment']
-                ):
+                if save_evaluation(temp_eval['session_name'], temp_eval['evaluator_name'], evaluation_data, temp_eval['comment']):
                     # Aktualizácia device tracking
-                    update_device_tracking(
-                        temp_eval['session_name'],
-                        temp_eval['device_fingerprint'],
-                        temp_eval['ip_address'],
-                        temp_eval['user_agent']
-                    )
+                    update_device_tracking(temp_eval['session_name'], temp_eval['device_fingerprint'], temp_eval['ip_address'], temp_eval['user_agent'])
                     
                     st.session_state.evaluation_submitted = True
                     st.session_state.show_confirmation = False
@@ -1797,10 +1280,10 @@ def evaluator_interface():
                         del st.session_state.temp_evaluation
                     st.rerun()
                 else:
-                    st.error("❌ Chyba pri ukladaní do databázy!")
+                    st.error("❌ Chyba pri ukladaní!")
         
         with col2:
-            if st.button("❌ Späť", key="back_btn", use_container_width=True):
+            if st.button("❌ Späť", use_container_width=True):
                 st.session_state.show_confirmation = False
                 st.rerun()
 
@@ -1831,12 +1314,9 @@ def main():
                 force_landing = True
                 st.session_state.admin_mode = False
     
-    # Získanie aktuálneho stavu
-    current_state = get_current_state()
-    
     # Ak je force landing mode, zobraz landing page
     if force_landing:
-        landing_page_interface()
+        simple_landing_page()
         return
     
     # Ak je evaluator mode alebo hide_sidebar, zobraz evaluator
@@ -1845,6 +1325,14 @@ def main():
         evaluator_interface()
         return
     
+    # Overenie admin session při štarte
+    if st.session_state.admin_session_token and not st.session_state.admin_authenticated:
+        if verify_admin_session(st.session_state.admin_session_token):
+            st.session_state.admin_authenticated = True
+    
+    # Získanie aktuálneho stavu
+    current_state = get_current_state()
+    
     # Sidebar pre navigáciu
     with st.sidebar:
         st.title("🧪 Hodnotenie vzoriek")
@@ -1852,6 +1340,9 @@ def main():
         # Zobrazenie aktuálnej session
         if current_state['session_active']:
             st.success(f"📋 **{current_state['session_name']}**")
+            st.metric("Hodnotenia", len(current_state['evaluations']))
+        else:
+            st.warning("⚠️ Hodnotenie neaktívne")
         
         if st.session_state.admin_authenticated:
             st.success("✅ Admin prihlásený")
@@ -1860,66 +1351,20 @@ def main():
         
         mode = st.radio(
             "Vyberte režim:",
-            ["👥 Hodnotiteľ", "🔧 Administrátor"],
-            index=1 if st.session_state.admin_mode else 0
+            ["🔧 Admin Dashboard", "👥 Hodnotiteľ"],
+            index=0 if st.session_state.admin_mode else 1
         )
         
-        st.session_state.admin_mode = (mode == "🔧 Administrátor")
+        st.session_state.admin_mode = (mode == "🔧 Admin Dashboard")
         
-        st.divider()
-        
-        # Informácie o aktuálnej session
-        if current_state['session_active']:
-            st.subheader("📊 Aktuálna session")
-            st.metric("Vzorky", current_state['samples_count'])
-            st.metric("Hodnotenia", len(current_state['evaluations']))
-            
-            # Rýchly prístup k landing page
-            app_url = "https://consumervote.streamlit.app"
-            landing_url = f"{app_url}?mode=landing&hide_sidebar=true"
-            
-            st.markdown("**🔗 Rýchly prístup:**")
-            st.markdown(f"""
-            <a href="{landing_url}" target="_blank" style="
-                display: inline-block;
-                padding: 0.4rem 0.8rem;
-                background-color: #3498db;
-                color: white;
-                text-decoration: none;
-                border-radius: 8px;
-                font-size: 0.9rem;
-                margin: 0.2rem 0;
-                text-align: center;
-                width: 100%;
-                box-sizing: border-box;
-            ">🖼️ Landing page</a>
-            """, unsafe_allow_html=True)
-            
-        else:
-            st.warning("⚠️ Hodnotenie nie je nastavené")
-        
-        # Database info
-        st.divider()
-        st.subheader("🗄️ Databáza")
-        try:
-            if os.path.exists("consumervote.db"):
-                db_size = os.path.getsize("consumervote.db") / 1024
-                st.write(f"📊 Veľkosť: {db_size:.1f} KB")
-                st.success("✅ SQLite pripojená")
-            else:
-                st.warning("⚠️ DB sa inicializuje...")
-        except:
-            st.error("❌ Problém s DB")
-        
-        if st.session_state.admin_authenticated:
-            st.divider()
-            if st.button("🚪 Rýchle odhlásenie", use_container_width=True):
-                st.session_state.admin_authenticated = False
-                st.session_state.admin_mode = False
-                st.rerun()
+        if st.session_state.admin_authenticated and st.button("🚪 Rýchle odhlásenie", use_container_width=True):
+            destroy_admin_session(st.session_state.admin_session_token)
+            st.session_state.admin_authenticated = False
+            st.session_state.admin_session_token = None
+            st.rerun()
     
     if st.session_state.admin_mode:
-        admin_interface()
+        admin_dashboard()
     else:
         evaluator_interface()
 
