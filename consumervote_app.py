@@ -1,4 +1,6 @@
 import streamlit as st
+import qrcode
+from io import BytesIO
 import pandas as pd
 import json
 from datetime import datetime
@@ -22,6 +24,26 @@ if 'evaluations' not in st.session_state:
     st.session_state.evaluations = []
 if 'session_active' not in st.session_state:
     st.session_state.session_active = False
+
+def generate_qr_code(url):
+    """Generuje QR kód pre zadanú URL"""
+    qr = qrcode.QRCode(
+        version=1,
+        error_correction=qrcode.constants.ERROR_CORRECT_L,
+        box_size=10,
+        border=4,
+    )
+    qr.add_data(url)
+    qr.make(fit=True)
+    
+    img = qr.make_image(fill_color="black", back_color="white")
+    
+    # Konverzia do bytes pre Streamlit
+    img_buffer = BytesIO()
+    img.save(img_buffer, format='PNG')
+    img_buffer.seek(0)
+    
+    return img_buffer
 
 
 
@@ -79,20 +101,39 @@ def admin_interface():
         
         with col2:
             if st.session_state.session_active:
-                st.subheader("🔗 Odkaz pre hodnotiteľov")
+                st.subheader("📱 QR kód pre hodnotiteľov")
                 
-                # Generovanie URL pre hodnotiteľov
-                # V skutočnej aplikácii by ste použili skutočnú URL
-                current_url = "http://localhost:8501"  # Zmeňte na vašu skutočnú URL
-                evaluator_url = f"{current_url}?mode=evaluator"
+                # Generovanie URL pre hodnotiteľov (bez admin konzoly)
+                base_url = st.get_option("browser.serverAddress") or "localhost"
+                port = st.get_option("server.port") or 8501
                 
-                # Zobrazenie odkazu
+                # Pre lokálne testovanie
+                if base_url == "localhost":
+                    current_url = f"http://localhost:{port}"
+                else:
+                    current_url = f"https://{base_url}"
+                
+                evaluator_url = f"{current_url}?mode=evaluator&hide_sidebar=true"
+                
+                # Generovanie a zobrazenie QR kódu
+                qr_buffer = generate_qr_code(evaluator_url)
+                st.image(qr_buffer, caption="Naskenujte pre hodnotenie", width=200)
+                
+                # Tlačidlo na otvorenie v novom okne
+                st.markdown(f"""
+                <a href="{evaluator_url}" target="_blank" style="
+                    display: inline-block;
+                    padding: 0.5rem 1rem;
+                    background-color: #ff4b4b;
+                    color: white;
+                    text-decoration: none;
+                    border-radius: 0.5rem;
+                    margin: 0.5rem 0;
+                ">🔗 Otvoriť hodnotenie v novom okne</a>
+                """, unsafe_allow_html=True)
+                
                 st.code(evaluator_url, language="text")
-                st.caption("💡 Hodnotitelia môžu použiť tento odkaz")
-                
-                if st.button("📋 Kopírovať odkaz"):
-                    st.write("Odkaz skopírovaný do schránky!")
-                    st.balloons()
+                st.caption("💡 Hodnotitelia môžu použiť QR kód alebo odkaz")
     
     # Zobrazenie aktuálnych nastavení
     if st.session_state.session_active:
@@ -134,13 +175,19 @@ def admin_interface():
 
 def evaluator_interface():
     """Rozhranie pre hodnotiteľov"""
+    
+    # Skontrolovať či sa má skryť sidebar
+    query_params = st.query_params
+    hide_sidebar = 'hide_sidebar' in query_params and query_params['hide_sidebar'] == 'true'
+    
     st.title("🧪 Hodnotenie vzoriek")
     
     if not st.session_state.session_active:
         st.error("❌ Hodnotenie nie je aktívne. Kontaktujte administrátora.")
-        if st.button("🔧 Prejsť na admin panel"):
-            st.session_state.admin_mode = True
-            st.rerun()
+        if not hide_sidebar:
+            if st.button("🔧 Prejsť na admin panel"):
+                st.session_state.admin_mode = True
+                st.rerun()
         return
     
     st.write("Usporiadajte vzorky podľa vašich preferencií (1 = najlepšia, 2 = druhá najlepšia, atď.)")
@@ -202,42 +249,50 @@ def evaluator_interface():
                     if comment:
                         st.write(f"**Komentár**: {comment}")
     
-    # Tlačidlo pre admin
-    st.divider()
-    if st.button("🔧 Admin panel"):
-        st.session_state.admin_mode = True
-        st.rerun()
+    # Tlačidlo pre admin len ak nie je skrytý sidebar
+    if not hide_sidebar:
+        st.divider()
+        if st.button("🔧 Admin panel"):
+            st.session_state.admin_mode = True
+            st.rerun()
 
 def main():
     """Hlavná funkcia aplikácie"""
     
     # Kontrola URL parametrov
     query_params = st.query_params
+    hide_sidebar = 'hide_sidebar' in query_params and query_params['hide_sidebar'] == 'true'
+    
     if 'mode' in query_params and query_params['mode'] == 'evaluator':
         st.session_state.admin_mode = False
     
-    # Sidebar pre navigáciu
-    with st.sidebar:
-        st.title("🧪 Hodnotenie vzoriek")
-        
-        mode = st.radio(
-            "Vyberte režim:",
-            ["👥 Hodnotiteľ", "🔧 Administrátor"],
-            index=1 if st.session_state.admin_mode else 0
-        )
-        
-        st.session_state.admin_mode = (mode == "🔧 Administrátor")
-        
-        st.divider()
-        
-        # Informácie o aplikácii
-        st.subheader("ℹ️ O aplikácii")
-        st.write("Aplikácia na hodnotenie vzoriek v poradí.")
-        
-        if st.session_state.session_active:
-            st.success(f"✅ Aktívne hodnotenie\n{st.session_state.samples_count} vzoriek")
-        else:
-            st.warning("⚠️ Hodnotenie nie je nastavené")
+    # Sidebar pre navigáciu (len ak nie je skrytý)
+    if not hide_sidebar:
+        with st.sidebar:
+            st.title("🧪 Hodnotenie vzoriek")
+            
+            mode = st.radio(
+                "Vyberte režim:",
+                ["👥 Hodnotiteľ", "🔧 Administrátor"],
+                index=1 if st.session_state.admin_mode else 0
+            )
+            
+            st.session_state.admin_mode = (mode == "🔧 Administrátor")
+            
+            st.divider()
+            
+            # Informácie o aplikácii
+            st.subheader("ℹ️ O aplikácii")
+            st.write("Aplikácia na hodnotenie vzoriek v poradí.")
+            
+            if st.session_state.session_active:
+                st.success(f"✅ Aktívne hodnotenie\n{st.session_state.samples_count} vzoriek")
+            else:
+                st.warning("⚠️ Hodnotenie nie je nastavené")
+    
+    # Ak je sidebar skrytý, force evaluator mode
+    if hide_sidebar:
+        st.session_state.admin_mode = False
     
     # Zobrazenie príslušného rozhrania
     if st.session_state.admin_mode:
