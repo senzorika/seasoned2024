@@ -16,11 +16,13 @@ def init_database():
     with sqlite3.connect("consumervote.db") as conn:
         cursor = conn.cursor()
         cursor.execute('CREATE TABLE IF NOT EXISTS sessions (id INTEGER PRIMARY KEY AUTOINCREMENT, session_name TEXT NOT NULL, is_active BOOLEAN DEFAULT 0, samples_count INTEGER, samples_names TEXT, winner TEXT, created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP)')
+        # FIX: Pridané ON DELETE CASCADE pre automatické mazanie hodnotení po zmazaní session
         cursor.execute('CREATE TABLE IF NOT EXISTS evaluations (id INTEGER PRIMARY KEY AUTOINCREMENT, session_id INTEGER, evaluator_name TEXT NOT NULL, evaluation_data TEXT NOT NULL, comment TEXT, created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP, FOREIGN KEY(session_id) REFERENCES sessions(id) ON DELETE CASCADE)')
         cursor.execute('CREATE TABLE IF NOT EXISTS device_tracking (id INTEGER PRIMARY KEY AUTOINCREMENT, device_fingerprint TEXT NOT NULL, session_id INTEGER, last_evaluation TIMESTAMP, UNIQUE(device_fingerprint, session_id))')
         cursor.execute('CREATE TABLE IF NOT EXISTS admin_sessions (id INTEGER PRIMARY KEY AUTOINCREMENT, session_token TEXT UNIQUE NOT NULL, ip_address TEXT, user_agent TEXT, created_at TIMESTAMP, expires_at TIMESTAMP)')
         if cursor.execute('SELECT COUNT(*) FROM sessions').fetchone()[0] == 0:
             cursor.execute("INSERT INTO sessions (session_name, is_active, samples_count, samples_names) VALUES ('Moje prvé hodnotenie', 0, 3, '[\"Vzorka 1\", \"Vzorka 2\", \"Vzorka 3\"]')")
+        # Zapnutie podpory pre foreign keys
         conn.execute("PRAGMA foreign_keys = ON;")
 
 # --- Overovanie a správa session ---
@@ -191,7 +193,7 @@ def render_admin_dashboard():
         else:
             session_dict = {s['session_name']: s['id'] for s in all_sessions}
             selected_name = st.selectbox("Vyberte session pre zobrazenie výsledkov", options=session_dict.keys())
-            # --- FIX: Pridaná kontrola, či bol vybraný názov, aby sa predišlo chybe pri prázdnom zozname ---
+            # --- FIX: Pridaná kontrola, či je niečo vybrané, aby sa predišlo pádu ---
             if selected_name:
                 selected_id = session_dict[selected_name]
                 session, evaluations = get_session_by_id(selected_id)
