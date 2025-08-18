@@ -118,16 +118,32 @@ def init_database():
 def get_client_info():
     """Získa informácie o klientovi"""
     try:
-        headers = st.context.headers if hasattr(st.context, 'headers') else {}
-        ip_address = (
-            headers.get('x-forwarded-for', '').split(',')[0].strip() or
-            headers.get('x-real-ip', '') or
-            headers.get('remote-addr', 'unknown')
-        )
-        user_agent = headers.get('user-agent', 'unknown')
-        return ip_address, user_agent
-    except:
+        # Nový spôsob prístupu k hlavičkám v Streamlit
+        from streamlit.web.server.server import Server
+        session_info = Server.get_current()._get_session_info_for_client(st.session_state.session_id)
+        if session_info:
+            headers = session_info.headers
+            ip_address = (
+                headers.get('x-forwarded-for', '').split(',')[0].strip() or
+                headers.get('x-real-ip', '') or
+                headers.get('remote-addr', 'unknown')
+            )
+            user_agent = headers.get('user-agent', 'unknown')
+            return ip_address, user_agent
         return "unknown", "unknown"
+    except Exception:
+         # Fallback pre staršie verzie alebo iné prostredia
+        try:
+            headers = st.context.headers
+            ip_address = (
+                headers.get('x-forwarded-for', '').split(',')[0].strip() or
+                headers.get('x-real-ip', '') or
+                headers.get('remote-addr', 'unknown')
+            )
+            user_agent = headers.get('user-agent', 'unknown')
+            return ip_address, user_agent
+        except:
+            return "unknown", "unknown"
 
 def create_admin_session():
     """Vytvorí admin session token"""
@@ -255,7 +271,7 @@ def get_current_state():
             samples_names = json.loads(settings[3]) if settings[3] else []
             
             # Získanie hodnotení pre aktuálnu session
-            cursor.execute('SELECT evaluator_name, evaluation_data, comment, created_at FROM evaluations WHERE session_name = ? OR session_name IS NULL', (session_name,))
+            cursor.execute('SELECT evaluator_name, evaluation_data, comment, created_at FROM evaluations WHERE session_name = ?', (session_name,))
             evaluations_raw = cursor.fetchall()
             
             evaluations = []
@@ -425,7 +441,7 @@ def clear_evaluations_for_session(session_name):
     cursor = conn.cursor()
     
     try:
-        cursor.execute('DELETE FROM evaluations WHERE session_name = ? OR session_name IS NULL', (session_name,))
+        cursor.execute('DELETE FROM evaluations WHERE session_name = ?', (session_name,))
         deleted_evaluations = cursor.rowcount
         
         # Vymaž aj device tracking pre túto session
@@ -769,7 +785,7 @@ def export_evaluations_to_csv(session_name=None):
                        comment as "Komentár", 
                        created_at as "Čas"
                 FROM evaluations 
-                WHERE session_name = ? OR session_name IS NULL
+                WHERE session_name = ?
                 ORDER BY created_at DESC
             ''', conn, params=(session_name,))
         else:
@@ -799,6 +815,13 @@ if 'admin_authenticated' not in st.session_state:
 
 if 'admin_session_token' not in st.session_state:
     st.session_state.admin_session_token = None
+    
+# Získanie session_id pre get_client_info()
+if 'session_id' not in st.session_state:
+    from streamlit.runtime.scriptrunner import get_script_run_ctx
+    ctx = get_script_run_ctx()
+    st.session_state.session_id = ctx.session_id
+
 
 # Admin heslo v MD5 (consumertest24)
 ADMIN_PASSWORD_MD5 = hashlib.md5("consumertest24".encode()).hexdigest()
@@ -810,19 +833,6 @@ def hash_password(password):
 def verify_password(password, stored_hash):
     """Overí heslo proti MD5 hash"""
     return hash_password(password) == stored_hash
-
-def generate_qr_code_url(url, size="200x200", error_correction="M"):
-    """Generuje URL pre QR kód pomocou online služby"""
-    encoded_url = urllib.parse.quote(url, safe='')
-    
-    # Skúsime viacero QR API služieb pre lepšiu dostupnosť
-    qr_services = [
-        f"https://api.qrserver.com/v1/create-qr-code/?size={size}&ecc={error_correction}&color=000000&bgcolor=ffffff&margin=2&data={encoded_url}",
-        f"https://chart.googleapis.com/chart?chs={size}&cht=qr&chl={encoded_url}&choe=UTF-8",
-        f"https://qr-code-generator24.com/qr-code-api?size={size}&data={encoded_url}"
-    ]
-    
-    return qr_services[0]  # Začneme s prvou službou
 
 def simple_landing_page():
     """Minimalistická landing page"""
@@ -906,37 +916,45 @@ def simple_landing_page():
         """, unsafe_allow_html=True)
         return
     
-    # QR kód - POUŽIJEM HTML IMG TAG namiesto st.image()
+    # URL pre priame hodnotenie
     app_url = "https://consumervote.streamlit.app"
     evaluator_url = f"{app_url}/?mode=evaluator"
     
-    # Rôzne QR API služby
+    # Zoznam spoľahlivých QR služieb
+    encoded_url = urllib.parse.quote(evaluator_url)
     qr_services = [
-        f"https://api.qrserver.com/v1/create-qr-code/?size=300x300&data={urllib.parse.quote(evaluator_url)}",
-        f"https://chart.googleapis.com/chart?chs=300x300&cht=qr&chl={urllib.parse.quote(evaluator_url)}&choe=UTF-8",
-        f"https://quickchart.io/qr?text={urllib.parse.quote(evaluator_url)}&size=300"
+        f"https://api.qrserver.com/v1/create-qr-code/?size=300x300&data={encoded_url}",
+        f"https://quickchart.io/qr?text={encoded_url}&size=300"
     ]
     
-    # Vytvorenie QR kódu pomocou HTML
-    qr_html = ""
+    # Vytvorenie HTML s fallbackmi
+    qr_html = """
+    <script>
+    function handleImgError(img, fallbackId) {
+        img.style.display = 'none';
+        const fallback = document.getElementById(fallbackId);
+        if (fallback) {
+            fallback.style.display = 'block';
+        }
+    }
+    </script>
+    """
+    
     for i, qr_url in enumerate(qr_services):
+        fallback_id = f'qr-fallback-{i+1}'
+        display_style = 'block' if i == 0 else 'none'
         qr_html += f'''
-        <img src="{qr_url}" 
-             class="qr-image" 
-             alt="QR kód pre hodnotenie"
-             onerror="this.style.display='none'; document.getElementById('qr-fallback-{i}').style.display='block';"
-             style="display: block;" />
+        <div id="qr-fallback-{i}" style="display: {display_style};">
+            <img src="{qr_url}" 
+                 class="qr-image" 
+                 alt="QR kód pre hodnotenie"
+                 onerror="handleImgError(this, '{fallback_id}')">
+        </div>
         '''
-        if i < len(qr_services) - 1:
-            qr_html += f'<div id="qr-fallback-{i}" style="display: none;">'
-        
-    # Zatvorenie fallback divov
-    for i in range(len(qr_services) - 1):
-        qr_html += '</div>'
     
     # Finálny fallback - tlačidlo
     qr_html += f'''
-    <div id="qr-fallback-final" style="display: none; text-align: center; padding: 2rem;">
+    <div id="qr-fallback-{len(qr_services)}" style="display: none; text-align: center; padding: 2rem;">
         <p style="margin-bottom: 1rem; color: #6b7280;">QR kód sa nepodarilo načítať</p>
         <a href="{evaluator_url}" target="_blank" style="
             display: inline-block;
@@ -949,22 +967,6 @@ def simple_landing_page():
             font-size: 1.125rem;
         ">Prejsť na hodnotenie</a>
     </div>
-    
-    <script>
-    // Ak sa ani jeden QR kód nenačíta, zobraz finálny fallback
-    setTimeout(function() {{
-        const images = document.querySelectorAll('.qr-image');
-        let anyVisible = false;
-        images.forEach(img => {{
-            if (img.style.display !== 'none' && img.complete && img.naturalWidth > 0) {{
-                anyVisible = true;
-            }}
-        }});
-        if (!anyVisible) {{
-            document.getElementById('qr-fallback-final').style.display = 'block';
-        }}
-    }}, 3000);
-    </script>
     '''
     
     # Zobrazenie obsahu
@@ -986,17 +988,6 @@ def simple_landing_page():
     </div>
     """, unsafe_allow_html=True)
     
-    # Debug sekcia (len pre testovanie)
-    with st.expander("🔧 Debug (pre admin)"):
-        st.write("**Target URL:**")
-        st.code(evaluator_url)
-        st.write("**QR služby:**")
-        for i, url in enumerate(qr_services):
-            st.write(f"Service {i+1}:")
-            st.code(url)
-            # Test link
-            st.markdown(f'<a href="{url}" target="_blank">Test QR {i+1}</a>', unsafe_allow_html=True)
-
 def admin_login():
     """Login formulár pre admin"""
     
@@ -1126,41 +1117,75 @@ def admin_dashboard():
         with col1:
             st.markdown('<h2 class="section-title">QR kód pre hodnotiteľov</h2>', unsafe_allow_html=True)
             
-            # URL aplikácie - OPRAVENÉ pre mobile
+            # URL aplikácie
             app_url = "https://consumervote.streamlit.app"
-            landing_url = f"{app_url}/?mode=landing"  # Jednoduchšia URL
+            landing_url = f"{app_url}/?mode=landing"
             
-            # QR kód - použijeme Google Charts pre najlepšiu kompatibilitu
-            qr_image_url = f"https://chart.googleapis.com/chart?chs=300x300&cht=qr&chl={urllib.parse.quote(landing_url)}&choe=UTF-8"
+            # --- START FIX: Robustný QR kód s Fallbackmi ---
+            # Použijeme zoznam spoľahlivých a moderných QR API služieb
+            encoded_url = urllib.parse.quote(landing_url)
+            qr_services = [
+                f"https://api.qrserver.com/v1/create-qr-code/?size=300x300&data={encoded_url}",
+                f"https://quickchart.io/qr?text={encoded_url}&size=300"
+            ]
             
-            col_qr1, col_qr2, col_qr3 = st.columns([1, 2, 1])
-            with col_qr2:
-                st.markdown('<div class="professional-card">', unsafe_allow_html=True)
-                try:
-                    st.image(qr_image_url, width=300, caption="QR kód pre hodnotenie")
-                except Exception as e:
-                    st.error(f"QR kód sa nepodarilo načítať: {e}")
-                    # Fallback QR service
-                    fallback_qr = f"https://api.qrserver.com/v1/create-qr-code/?size=300x300&data={urllib.parse.quote(landing_url)}"
-                    try:
-                        st.image(fallback_qr, width=300)
-                    except:
-                        st.warning("QR kód nedostupný")
-                st.markdown('</div>', unsafe_allow_html=True)
+            # Vytvorenie HTML s viacerými <img src> a JavaScript fallbackom.
+            # Tento prístup je robustnejší ako st.image, pretože sa spolieha na prehliadač klienta
+            # a má vstavané zálohy, ak jedna služba zlyhá.
             
-            # Debug informácie pre admin
+            qr_html = '<div class="professional-card" style="text-align: center; padding: 1rem;">'
+            
+            qr_html += """
+            <script>
+            function handleQrError(img, fallbackId) {
+                img.style.display = 'none'; // Skryj pokazený obrázok
+                const fallback = document.getElementById(fallbackId);
+                if (fallback) {
+                    fallback.style.display = 'block'; // Zobraz ďalší v poradí
+                }
+            }
+            </script>
+            """
+            
+            # Vytvorenie reťazca fallbackov
+            for i, qr_url in enumerate(qr_services):
+                fallback_id = f'qr-admin-fallback-{i+1}'
+                display_style = 'block' if i == 0 else 'none'
+                
+                qr_html += f'''
+                <div id="qr-admin-fallback-{i}" style="display: {display_style};">
+                    <img src="{qr_url}" 
+                         alt="QR kód pre hodnotenie"
+                         style="width: 100%; max-width: 300px; height: auto; margin: auto;"
+                         onerror="handleQrError(this, '{fallback_id}')">
+                </div>
+                '''
+            
+            # Finálny textový fallback, ak žiadny QR kód nefunguje
+            qr_html += f'''
+            <div id="qr-admin-fallback-{len(qr_services)}" style="display: none; padding: 2rem;">
+                <p style="color: #ef4444; font-weight: 500;">Nepodarilo sa načítať QR kód.</p>
+                <p style="font-size: 0.9rem; color: #6b7280;">Prosím, použite nasledujúci odkaz:</p>
+                <a href="{landing_url}" target="_blank">{landing_url}</a>
+            </div>
+            '''
+            
+            qr_html += '</div>'
+            
+            # Zobrazenie HTML v Streamlit
+            st.markdown(qr_html, unsafe_allow_html=True)
+            # --- END FIX ---
+
             with st.expander("URL pre QR kód"):
                 st.code(landing_url)
-                st.write("**QR kód URL:**")
-                st.code(qr_image_url)
-            
+
             # Akčné tlačidlá
             col_btn1, col_btn2 = st.columns(2)
             
             with col_btn1:
                 st.markdown(f"""
                 <a href="{landing_url}" target="_blank" style="
-                    display: inline-block;
+                    display: flex; align-items: center; justify-content: center;
                     padding: 0.75rem 1.5rem;
                     background-color: #10b981;
                     color: white;
@@ -1170,14 +1195,15 @@ def admin_dashboard():
                     text-align: center;
                     width: 100%;
                     box-sizing: border-box;
+                    height: 48px;
                 ">Otvoriť Landing Page</a>
                 """, unsafe_allow_html=True)
             
             with col_btn2:
-                evaluator_url = f"{app_url}/?mode=evaluator"  # Jednoduchšia URL
+                evaluator_url = f"{app_url}/?mode=evaluator"
                 st.markdown(f"""
                 <a href="{evaluator_url}" target="_blank" style="
-                    display: inline-block;
+                    display: flex; align-items: center; justify-content: center;
                     padding: 0.75rem 1.5rem;
                     background-color: #3b82f6;
                     color: white;
@@ -1187,6 +1213,7 @@ def admin_dashboard():
                     text-align: center;
                     width: 100%;
                     box-sizing: border-box;
+                    height: 48px;
                 ">Priame Hodnotenie</a>
                 """, unsafe_allow_html=True)
         
@@ -1282,33 +1309,28 @@ def admin_results_section(current_state):
         return
     
     # Export tlačidlá
-    col1, col2 = st.columns(2)
-    with col1:
-        if st.button("Export CSV (aktuálna session)", use_container_width=True):
-            df = export_evaluations_to_csv(current_state['session_name'])
-            if not df.empty:
-                csv = df.to_csv(index=False)
-                st.download_button(
-                    label="Stiahnuť CSV",
-                    data=csv,
-                    file_name=f"hodnotenia_{current_state['session_name'].replace(' ', '_')}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv",
-                    mime="text/csv",
-                    use_container_width=True
-                )
+    df_current = export_evaluations_to_csv(current_state['session_name'])
+    if not df_current.empty:
+        csv_current = df_current.to_csv(index=False).encode('utf-8')
+        st.download_button(
+            label="Stiahnuť CSV (aktuálna session)",
+            data=csv_current,
+            file_name=f"hodnotenia_{current_state['session_name'].replace(' ', '_')}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv",
+            mime="text/csv",
+            use_container_width=True
+        )
     
-    with col2:
-        if st.button("Export CSV (všetky sessions)", use_container_width=True):
-            df = export_evaluations_to_csv()
-            if not df.empty:
-                csv = df.to_csv(index=False)
-                st.download_button(
-                    label="Stiahnuť všetky CSV",
-                    data=csv,
-                    file_name=f"hodnotenia_vsetky_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv",
-                    mime="text/csv",
-                    use_container_width=True
-                )
-    
+    df_all = export_evaluations_to_csv()
+    if not df_all.empty:
+        csv_all = df_all.to_csv(index=False).encode('utf-8')
+        st.download_button(
+            label="Stiahnuť CSV (všetky sessions)",
+            data=csv_all,
+            file_name=f"hodnotenia_vsetky_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv",
+            mime="text/csv",
+            use_container_width=True
+        )
+
     # Zobrazenie posledných hodnotení
     st.write("**Posledných 10 hodnotení:**")
     df_display = pd.DataFrame(current_state['evaluations'][-10:])
@@ -1365,33 +1387,20 @@ def evaluator_interface():
     # Aplikuj profesionálne CSS
     st.markdown(get_professional_css(), unsafe_allow_html=True)
     
-    # Ak prichádzame z QR kódu (mode=evaluator), skryj sidebar úplne
-    query_params = {}
-    try:
-        if hasattr(st, 'query_params'):
-            if hasattr(st.query_params, 'to_dict'):
-                query_params = st.query_params.to_dict()
-            elif hasattr(st.query_params, 'items'):
-                query_params = dict(st.query_params.items())
-            else:
-                query_params = dict(st.query_params)
-        
-        if query_params.get('mode') == 'evaluator':
-            st.markdown("""
-            <style>
-            .stSidebar {
-                display: none !important;
-            }
-            .main > div {
-                padding-left: 1rem !important;
-                padding-right: 1rem !important;
-                max-width: 100% !important;
-            }
-            </style>
-            """, unsafe_allow_html=True)
-    except Exception as e:
-        # Ak sa query params nepodarí získať, pokračuj bez nich
-        pass
+    # Skrytie sidebaru, ak je v URL parametr `?mode=evaluator`
+    if 'mode' in st.query_params and st.query_params['mode'] == 'evaluator':
+        st.markdown("""
+        <style>
+        .stSidebar {
+            display: none !important;
+        }
+        .main > div {
+            padding-left: 1rem !important;
+            padding-right: 1rem !important;
+            max-width: 100% !important;
+        }
+        </style>
+        """, unsafe_allow_html=True)
     
     # Získanie aktuálneho stavu
     current_state = get_current_state()
@@ -1401,23 +1410,6 @@ def evaluator_interface():
     
     if not current_state['session_active']:
         st.error("Hodnotenie nie je aktívne. Kontaktujte administrátora.")
-        
-        # Pridaj tlačidlo späť na landing page pre mobile
-        app_url = "https://consumervote.streamlit.app"
-        landing_url = f"{app_url}/?mode=landing"
-        st.markdown(f"""
-        <div style="text-align: center; margin: 2rem 0;">
-            <a href="{landing_url}" style="
-                display: inline-block;
-                padding: 1rem 2rem;
-                background-color: #6b7280;
-                color: white;
-                text-decoration: none;
-                border-radius: 8px;
-                font-weight: 600;
-            ">Späť na úvodnú stránku</a>
-        </div>
-        """, unsafe_allow_html=True)
         return
     
     # Kontrola device limitu
@@ -1477,108 +1469,67 @@ def evaluator_interface():
         st.success("Ďakujeme za hodnotenie!")
         st.balloons()
         
-        col1, col2 = st.columns(2)
-        with col1:
-            if st.button("Nové hodnotenie", type="primary", use_container_width=True):
-                st.session_state.evaluation_submitted = False
-                st.session_state.show_confirmation = False
-                st.rerun()
-        
-        with col2:
-            # Tlačidlo späť na landing page
-            app_url = "https://consumervote.streamlit.app"
-            landing_url = f"{app_url}/?mode=landing"
-            st.markdown(f"""
-            <a href="{landing_url}" target="_blank" style="
-                display: inline-block;
-                padding: 0.75rem 1.5rem;
-                background-color: #6b7280;
-                color: white;
-                text-decoration: none;
-                border-radius: 8px;
-                font-weight: 500;
-                text-align: center;
-                width: 100%;
-                box-sizing: border-box;
-                margin-top: 0.5rem;
-            ">Späť na úvodné</a>
-            """, unsafe_allow_html=True)
+        if st.button("Nové hodnotenie", type="primary", use_container_width=True):
+            st.session_state.evaluation_submitted = False
+            st.session_state.show_confirmation = False
+            st.rerun()
         
         return
     
     # Krok 1: Hlavný formulár
     if not st.session_state.show_confirmation:
         
-        st.info("Vyberte TOP 3 vzorky v poradí od najlepšej po tretiu najlepšiu")
-        
-        # Meno hodnotiteľa
-        st.markdown('<h2 class="section-title">Vaše meno</h2>', unsafe_allow_html=True)
-        evaluator_name = st.text_input("", placeholder="Zadajte vaše meno alebo prezývku", label_visibility="collapsed")
-        
-        st.markdown('<h2 class="section-title">TOP 3 vzorky</h2>', unsafe_allow_html=True)
-        
-        # 1. miesto
-        st.markdown('<h3 class="subtitle">1. miesto - Najlepšia vzorka</h3>', unsafe_allow_html=True)
-        first_place = st.selectbox("", options=['Vyberte vzorku...'] + current_state['samples_names'], key="first_place_select", label_visibility="collapsed")
-        if first_place == 'Vyberte vzorku...':
-            first_place = None
-        
-        # 2. miesto
-        st.markdown('<h3 class="subtitle">2. miesto - Druhá najlepšia</h3>', unsafe_allow_html=True)
-        available_for_second = [s for s in current_state['samples_names'] if s != first_place]
-        second_place = st.selectbox("", options=['Vyberte vzorku...'] + available_for_second, key="second_place_select", label_visibility="collapsed")
-        if second_place == 'Vyberte vzorku...':
-            second_place = None
-        
-        # 3. miesto
-        st.markdown('<h3 class="subtitle">3. miesto - Tretia najlepšia</h3>', unsafe_allow_html=True)
-        available_for_third = [s for s in current_state['samples_names'] if s != first_place and s != second_place]
-        third_place = st.selectbox("", options=['Vyberte vzorku...'] + available_for_third, key="third_place_select", label_visibility="collapsed")
-        if third_place == 'Vyberte vzorku...':
-            third_place = None
-        
-        # Zostavenie výberu
-        selected_samples = {}
-        if first_place:
-            selected_samples['1'] = first_place
-        if second_place:
-            selected_samples['2'] = second_place
-        if third_place:
-            selected_samples['3'] = third_place
-        
-        # Zobrazenie súhrnu
-        if selected_samples:
-            st.markdown('<h2 class="section-title">Váš výber</h2>', unsafe_allow_html=True)
-            for place, sample in selected_samples.items():
-                rank_class = "first" if place == "1" else "second" if place == "2" else "third"
-                st.markdown(f"""
-                <div class="ranking-item {rank_class}">
-                    <strong>{place}. miesto:</strong> {sample}
-                </div>
-                """, unsafe_allow_html=True)
-        
-        # Komentár
-        st.markdown('<h2 class="section-title">Komentár (voliteľný)</h2>', unsafe_allow_html=True)
-        comment = st.text_area("", placeholder="Váš komentár k hodnoteniu...", label_visibility="collapsed", height=100)
-        
-        # Tlačidlo pokračovať
-        if st.button("Pokračovať na kontrolu", type="primary", use_container_width=True):
-            if not evaluator_name.strip():
-                st.error("Prosím zadajte vaše meno!")
-            elif not selected_samples:
-                st.error("Prosím vyberte aspoň jednu vzorku!")
-            else:
-                st.session_state.temp_evaluation = {
-                    'session_name': current_state['session_name'],
-                    'evaluator_name': evaluator_name,
-                    'selected_samples': selected_samples,
-                    'comment': comment,
-                    'device_fingerprint': device_fingerprint,
-                    'ip_address': ip_address,
-                    'user_agent': user_agent
-                }
-                st.session_state.show_confirmation = True
-                st.rerun()
+        with st.form("evaluation_form"):
+            st.info("Vyberte TOP 3 vzorky v poradí od najlepšej po tretiu najlepšiu")
+            
+            # Meno hodnotiteľa
+            st.markdown('<h2 class="section-title">Vaše meno</h2>', unsafe_allow_html=True)
+            evaluator_name = st.text_input("", placeholder="Zadajte vaše meno alebo prezývku", label_visibility="collapsed")
+            
+            st.markdown('<h2 class="section-title">TOP 3 vzorky</h2>', unsafe_allow_html=True)
+            
+            # 1. miesto
+            st.markdown('<h3 class="subtitle">1. miesto - Najlepšia vzorka</h3>', unsafe_allow_html=True)
+            first_place = st.selectbox("", options=[''] + current_state['samples_names'], key="first_place_select", label_visibility="collapsed", format_func=lambda x: "Vyberte vzorku..." if x == "" else x)
+            
+            # 2. miesto
+            st.markdown('<h3 class="subtitle">2. miesto - Druhá najlepšia</h3>', unsafe_allow_html=True)
+            available_for_second = [s for s in current_state['samples_names'] if s != first_place]
+            second_place = st.selectbox("", options=[''] + available_for_second, key="second_place_select", label_visibility="collapsed", format_func=lambda x: "Vyberte vzorku..." if x == "" else x)
+            
+            # 3. miesto
+            st.markdown('<h3 class="subtitle">3. miesto - Tretia najlepšia</h3>', unsafe_allow_html=True)
+            available_for_third = [s for s in current_state['samples_names'] if s != first_place and s != second_place]
+            third_place = st.selectbox("", options=[''] + available_for_third, key="third_place_select", label_visibility="collapsed", format_func=lambda x: "Vyberte vzorku..." if x == "" else x)
+            
+            # Komentár
+            st.markdown('<h2 class="section-title">Komentár (voliteľný)</h2>', unsafe_allow_html=True)
+            comment = st.text_area("", placeholder="Váš komentár k hodnoteniu...", label_visibility="collapsed", height=100)
+            
+            submitted = st.form_submit_button("Pokračovať na kontrolu", type="primary", use_container_width=True)
+
+            if submitted:
+                selected_samples = {}
+                if first_place: selected_samples['1'] = first_place
+                if second_place: selected_samples['2'] = second_place
+                if third_place: selected_samples['3'] = third_place
+
+                if not evaluator_name.strip():
+                    st.error("Prosím zadajte vaše meno!")
+                elif not selected_samples:
+                    st.error("Prosím vyberte aspoň jednu vzorku!")
+                else:
+                    st.session_state.temp_evaluation = {
+                        'session_name': current_state['session_name'],
+                        'evaluator_name': evaluator_name,
+                        'selected_samples': selected_samples,
+                        'comment': comment,
+                        'device_fingerprint': device_fingerprint,
+                        'ip_address': ip_address,
+                        'user_agent': user_agent
+                    }
+                    st.session_state.show_confirmation = True
+                    st.rerun()
     
     # Krok 2: Potvrdzovacie okno
     else:
@@ -1646,102 +1597,23 @@ def main():
     # Inicializácia databázy
     init_database()
     
-    # Získanie query parametrov s lepším error handlingom
-    query_params = {}
-    try:
-        # Skús rôzne spôsoby získania query parametrov
-        if hasattr(st, 'query_params'):
-            if hasattr(st.query_params, 'to_dict'):
-                query_params = st.query_params.to_dict()
-            elif hasattr(st.query_params, 'items'):
-                query_params = dict(st.query_params.items())
-            else:
-                query_params = dict(st.query_params)
-    except Exception as e:
-        st.sidebar.error(f"Chyba pri získavaní query parametrov: {e}")
-        query_params = {}
-    
-    # Debug query parametrov
-    if query_params:
-        st.sidebar.write("**Debug - Query params:**")
-        st.sidebar.json(query_params)
-    
     # Kontrola módu z URL
-    hide_sidebar = False
-    force_evaluator = False
-    force_landing = False
-    
-    # Spracovanie query parametrov
-    mode = query_params.get('mode', '').lower() if 'mode' in query_params else ''
-    hide_sidebar_param = query_params.get('hide_sidebar', '').lower() if 'hide_sidebar' in query_params else ''
-    
-    if hide_sidebar_param == 'true':
-        hide_sidebar = True
-    
-    if mode == 'evaluator':
-        force_evaluator = True
-        st.session_state.admin_mode = False
-    elif mode == 'landing':
-        force_landing = True
-        st.session_state.admin_mode = False
-    
-    # Debug informácie
-    if query_params:
-        st.sidebar.write(f"**Mode:** {mode}")
-        st.sidebar.write(f"**Force evaluator:** {force_evaluator}")
-        st.sidebar.write(f"**Force landing:** {force_landing}")
-        st.sidebar.write(f"**Hide sidebar:** {hide_sidebar}")
-    
-    # Ak je force landing mode, zobraz landing page
-    if force_landing:
+    mode = st.query_params.get('mode', '').lower()
+
+    if mode == 'landing':
         simple_landing_page()
         return
     
-    # Ak je evaluator mode alebo hide_sidebar, zobraz evaluator
-    if force_evaluator or hide_sidebar:
+    # Prepnutie do režimu hodnotiteľa, ak je to v URL
+    if mode == 'evaluator' and st.session_state.admin_mode:
         st.session_state.admin_mode = False
-        
-        # Skryť sidebar pre mobile verziu
-        if hide_sidebar:
-            st.markdown("""
-            <style>
-            .stSidebar {
-                display: none;
-            }
-            .main > div {
-                padding-left: 1rem !important;
-                padding-right: 1rem !important;
-            }
-            </style>
-            """, unsafe_allow_html=True)
-        
-        evaluator_interface()
-        return
-    
-    # Overenie admin session při štarte
-    if st.session_state.admin_session_token and not st.session_state.admin_authenticated:
-        if verify_admin_session(st.session_state.admin_session_token):
-            st.session_state.admin_authenticated = True
-    
-    # Získanie aktuálneho stavu
-    current_state = get_current_state()
-    
-    # Aplikuj profesionálne CSS aj pre sidebar
-    st.markdown(get_professional_css(), unsafe_allow_html=True)
-    
-    # Sidebar pre navigáciu
+        st.rerun()
+
+    # Sidebar pre navigáciu (zobrazí sa všade okrem landing page)
     with st.sidebar:
         st.title("Hodnotenie vzoriek")
         
-        # Debug informácie
-        if query_params:
-            with st.expander("Debug Query Params"):
-                st.json(query_params)
-                st.write(f"Mode: {mode}")
-                st.write(f"Force evaluator: {force_evaluator}")
-                st.write(f"Hide sidebar: {hide_sidebar}")
-        
-        # Zobrazenie aktuálnej session
+        current_state = get_current_state()
         if current_state['session_active']:
             st.success(f"**{current_state['session_name']}**")
             st.metric("Hodnotenia", len(current_state['evaluations']))
@@ -1753,32 +1625,31 @@ def main():
         else:
             st.info("Admin neprihlásený")
         
-        mode_selection = st.radio(
-            "Vyberte režim:",
-            ["Admin Dashboard", "Hodnotiteľ"],
-            index=0 if st.session_state.admin_mode else 1
-        )
-        
-        st.session_state.admin_mode = (mode_selection == "Admin Dashboard")
-        
-        # Rýchle odkazy pre testovanie
+        # Zmena režimu cez radio button
+        if 'admin_mode' in st.session_state:
+            current_index = 0 if st.session_state.admin_mode else 1
+            mode_selection = st.radio(
+                "Vyberte režim:",
+                ["Admin Dashboard", "Hodnotiteľ"],
+                index=current_index,
+                key='mode_selector'
+            )
+            st.session_state.admin_mode = (mode_selection == "Admin Dashboard")
+
+        st.divider()
         st.markdown("**Rýchle odkazy:**")
         app_url = "https://consumervote.streamlit.app"
+        st.markdown(f'<a href="{app_url}/?mode=landing" target="_blank">Landing Page</a>', unsafe_allow_html=True)
+        st.markdown(f'<a href="{app_url}/?mode=evaluator" target="_blank">Evaluator</a>', unsafe_allow_html=True)
         
-        # Landing page link
-        landing_url = f"{app_url}/?mode=landing"
-        st.markdown(f'<a href="{landing_url}" target="_blank">Landing Page</a>', unsafe_allow_html=True)
-        
-        # Evaluator link  
-        evaluator_url = f"{app_url}/?mode=evaluator"
-        st.markdown(f'<a href="{evaluator_url}" target="_blank">Evaluator</a>', unsafe_allow_html=True)
-        
-        if st.session_state.admin_authenticated and st.button("Rýchle odhlásenie", use_container_width=True):
-            destroy_admin_session(st.session_state.admin_session_token)
-            st.session_state.admin_authenticated = False
-            st.session_state.admin_session_token = None
-            st.rerun()
-    
+        if st.session_state.admin_authenticated:
+            if st.button("Rýchle odhlásenie", use_container_width=True):
+                destroy_admin_session(st.session_state.admin_session_token)
+                st.session_state.admin_authenticated = False
+                st.session_state.admin_session_token = None
+                st.rerun()
+
+    # Zobrazenie hlavného obsahu na základe režimu
     if st.session_state.admin_mode:
         admin_dashboard()
     else:
