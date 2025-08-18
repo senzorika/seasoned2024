@@ -864,14 +864,21 @@ def simple_landing_page():
         box-shadow: 0 4px 20px rgba(0, 0, 0, 0.1);
         border: 1px solid #e5e7eb;
         margin-bottom: 2rem;
+        display: inline-block;
     }
-    .debug-info {
-        background: #f0f0f0;
-        padding: 1rem;
-        border-radius: 8px;
-        margin: 1rem 0;
-        font-family: monospace;
-        font-size: 0.9rem;
+    .qr-image {
+        width: 300px;
+        height: 300px;
+        border: none;
+        display: block;
+    }
+    .instructions {
+        background: rgba(59, 130, 246, 0.1);
+        border: 1px solid rgba(59, 130, 246, 0.2);
+        border-radius: 12px;
+        padding: 1.5rem;
+        margin-top: 2rem;
+        color: #1f2937;
     }
     @media (max-width: 768px) {
         .landing-title {
@@ -879,6 +886,10 @@ def simple_landing_page():
         }
         .qr-container {
             padding: 1.5rem;
+        }
+        .qr-image {
+            width: 250px;
+            height: 250px;
         }
     }
     </style>
@@ -895,79 +906,96 @@ def simple_landing_page():
         """, unsafe_allow_html=True)
         return
     
-    # Hlavný obsah s centrom
-    st.markdown(f'<h1 class="landing-title">{current_state["session_name"]}</h1>', unsafe_allow_html=True)
-    
-    # QR kód - OPRAVENÁ URL pre mobile
+    # QR kód - POUŽIJEM HTML IMG TAG namiesto st.image()
     app_url = "https://consumervote.streamlit.app"
-    # Použijeme jednoduchšiu URL bez hide_sidebar pre lepšiu kompatibilitu
     evaluator_url = f"{app_url}/?mode=evaluator"
     
-    # Debug informácie
-    with st.expander("Debug informácie (pre testovanie)"):
-        st.write("**Generovaná URL:**")
-        st.code(evaluator_url)
-        st.write("**QR kód URL:**")
-        qr_debug_url = f"https://chart.googleapis.com/chart?chs=400x400&cht=qr&chl={urllib.parse.quote(evaluator_url)}&choe=UTF-8"
-        st.code(qr_debug_url)
+    # Rôzne QR API služby
+    qr_services = [
+        f"https://api.qrserver.com/v1/create-qr-code/?size=300x300&data={urllib.parse.quote(evaluator_url)}",
+        f"https://chart.googleapis.com/chart?chs=300x300&cht=qr&chl={urllib.parse.quote(evaluator_url)}&choe=UTF-8",
+        f"https://quickchart.io/qr?text={urllib.parse.quote(evaluator_url)}&size=300"
+    ]
     
-    # Centrovaný QR kód s fallback
-    col1, col2, col3 = st.columns([1, 2, 1])
-    with col2:
-        # Skúsime najprv Google Charts (najspoľahlivejšie)
-        qr_url = f"https://chart.googleapis.com/chart?chs=400x400&cht=qr&chl={urllib.parse.quote(evaluator_url)}&choe=UTF-8"
+    # Vytvorenie QR kódu pomocou HTML
+    qr_html = ""
+    for i, qr_url in enumerate(qr_services):
+        qr_html += f'''
+        <img src="{qr_url}" 
+             class="qr-image" 
+             alt="QR kód pre hodnotenie"
+             onerror="this.style.display='none'; document.getElementById('qr-fallback-{i}').style.display='block';"
+             style="display: block;" />
+        '''
+        if i < len(qr_services) - 1:
+            qr_html += f'<div id="qr-fallback-{i}" style="display: none;">'
         
-        try:
-            st.markdown('<div class="qr-container">', unsafe_allow_html=True)
-            st.image(qr_url, width=400, caption="Naskenujte pre hodnotenie")
-            st.markdown('</div>', unsafe_allow_html=True)
-        except Exception as e:
-            st.error(f"Chyba pri načítaní QR kódu: {e}")
-            
-            # Fallback - alternatívne QR služby
-            alternative_qr_urls = [
-                f"https://api.qrserver.com/v1/create-qr-code/?size=400x400&data={urllib.parse.quote(evaluator_url)}",
-                f"https://qr-code-generator24.com/api/qr?size=400&data={urllib.parse.quote(evaluator_url)}"
-            ]
-            
-            qr_loaded = False
-            for alt_url in alternative_qr_urls:
-                try:
-                    st.image(alt_url, width=400)
-                    qr_loaded = True
-                    break
-                except:
-                    continue
-            
-            if not qr_loaded:
-                # Ak sa nepodarí načítať QR kód, zobraz tlačidlo
-                st.markdown(f"""
-                <div style="text-align: center; margin: 2rem 0;">
-                    <p>QR kód sa nepodarilo načítať. Použite priamy odkaz:</p>
-                    <a href="{evaluator_url}" target="_blank" style="
-                        display: inline-block;
-                        padding: 1rem 2rem;
-                        background-color: #3b82f6;
-                        color: white;
-                        text-decoration: none;
-                        border-radius: 8px;
-                        font-weight: 600;
-                        font-size: 1.125rem;
-                        margin: 1rem 0;
-                    ">Prejsť na hodnotenie</a>
-                </div>
-                """, unsafe_allow_html=True)
+    # Zatvorenie fallback divov
+    for i in range(len(qr_services) - 1):
+        qr_html += '</div>'
     
-    # Inštrukcie pre používateľov
-    st.markdown("""
-    <div style="text-align: center; margin-top: 2rem; color: #6b7280;">
-        <p><strong>Ako hodnotiť:</strong></p>
-        <p>1. Naskenujte QR kód fotoaparátom telefónu</p>
-        <p>2. Otvorte odkaz v prehliadači</p>
-        <p>3. Vyberte TOP 3 vzorky</p>
-        <p>4. Odošlite hodnotenie</p>
+    # Finálny fallback - tlačidlo
+    qr_html += f'''
+    <div id="qr-fallback-final" style="display: none; text-align: center; padding: 2rem;">
+        <p style="margin-bottom: 1rem; color: #6b7280;">QR kód sa nepodarilo načítať</p>
+        <a href="{evaluator_url}" target="_blank" style="
+            display: inline-block;
+            padding: 1rem 2rem;
+            background-color: #3b82f6;
+            color: white;
+            text-decoration: none;
+            border-radius: 8px;
+            font-weight: 600;
+            font-size: 1.125rem;
+        ">Prejsť na hodnotenie</a>
+    </div>
+    
+    <script>
+    // Ak sa ani jeden QR kód nenačíta, zobraz finálny fallback
+    setTimeout(function() {{
+        const images = document.querySelectorAll('.qr-image');
+        let anyVisible = false;
+        images.forEach(img => {{
+            if (img.style.display !== 'none' && img.complete && img.naturalWidth > 0) {{
+                anyVisible = true;
+            }}
+        }});
+        if (!anyVisible) {{
+            document.getElementById('qr-fallback-final').style.display = 'block';
+        }}
+    }}, 3000);
+    </script>
+    '''
+    
+    # Zobrazenie obsahu
+    st.markdown(f"""
+    <div class="landing-container">
+        <h1 class="landing-title">{current_state['session_name']}</h1>
+        
+        <div class="qr-container">
+            {qr_html}
+        </div>
+        
+        <div class="instructions">
+            <h3>Ako hodnotiť:</h3>
+            <p>1. Naskenujte QR kód fotoaparátom telefónu</p>
+            <p>2. Otvorte odkaz v prehliadači</p>
+            <p>3. Vyberte TOP 3 vzorky</p>
+            <p>4. Odošlite hodnotenie</p>
+        </div>
     </div>
     """, unsafe_allow_html=True)
+    
+    # Debug sekcia (len pre testovanie)
+    with st.expander("🔧 Debug (pre admin)"):
+        st.write("**Target URL:**")
+        st.code(evaluator_url)
+        st.write("**QR služby:**")
+        for i, url in enumerate(qr_services):
+            st.write(f"Service {i+1}:")
+            st.code(url)
+            # Test link
+            st.markdown(f'<a href="{url}" target="_blank">Test QR {i+1}</a>', unsafe_allow_html=True)
 
 def admin_login():
     """Login formulár pre admin"""
