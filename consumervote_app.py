@@ -533,18 +533,17 @@ def admin_dashboard():
     if current_state['session_active']:
         col1, col2 = st.columns([2, 1])
         with col1:
-            st.markdown('<h2 class="section-title">QR kód pre hodnotiteľov</h2>', unsafe_allow_html=True)
+            st.markdown('<h2 class="section-title">QR kód pre priame hodnotenie</h2>', unsafe_allow_html=True)
             
-            # --- START FIX: Robustné generovanie QR kódu pomocou components.html ---
+            # --- START FIX: QR kód teraz odkazuje priamo na hodnotiaci formulár ---
             app_url = "https://consumervote.streamlit.app"
-            landing_url = f"{app_url}/?mode=landing"
-            encoded_url = urllib.parse.quote(landing_url)
+            evaluator_url = f"{app_url}/?mode=evaluator" # ZMENA: Odkaz priamo na evaluator
+            encoded_url = urllib.parse.quote(evaluator_url)
             qr_services = [
                 f"https://api.qrserver.com/v1/create-qr-code/?size=300x300&data={encoded_url}",
                 f"https://quickchart.io/qr?text={encoded_url}&size=300"
             ]
             
-            # Vytvorenie sebestačného HTML pre komponent
             qr_html = f"""
             <html>
             <head>
@@ -563,14 +562,14 @@ def admin_dashboard():
                 <div id="qr-fallback-final" style="display: none; padding: 2rem; text-align:center; font-family: sans-serif;">
                     <p style="color: #ef4444;"><b>Chyba pri načítaní QR kódu.</b></p>
                     <p>Použite odkaz:</p>
-                    <a href="{landing_url}" target="_blank">{landing_url}</a>
+                    <a href="{evaluator_url}" target="_blank">{evaluator_url}</a>
                 </div>
             </body>
             </html>
             """
             with st.container():
                 st.markdown('<div class="professional-card">', unsafe_allow_html=True)
-                components.html(qr_html, height=310) # Renderovanie komponentu
+                components.html(qr_html, height=310)
                 st.markdown('</div>', unsafe_allow_html=True)
             # --- END FIX ---
 
@@ -654,14 +653,20 @@ def evaluator_interface():
         format_func = lambda x: "Vyberte..." if x == '' else x
         
         first = st.selectbox("1. miesto (najlepšia):", options, format_func=format_func, key="first")
-        second = st.selectbox("2. miesto:", [o for o in options if o != first], format_func=format_func, key="second")
-        third = st.selectbox("3. miesto:", [o for o in options if o not in [first, second]], format_func=format_func, key="third")
+        second_options = [o for o in options if o != first] if first else options
+        second = st.selectbox("2. miesto:", second_options, format_func=format_func, key="second")
+        third_options = [o for o in second_options if o != second] if second else second_options
+        third = st.selectbox("3. miesto:", third_options, format_func=format_func, key="third")
         
         comment = st.text_area("Komentár (voliteľný):", key="comment")
         
         if st.form_submit_button("Odoslať hodnotenie", type="primary", use_container_width=True):
-            if not evaluator_name.strip(): st.error("Zadajte prosím meno."); return
-            if not first: st.error("Vyberte aspoň 1. miesto."); return
+            if not evaluator_name.strip(): 
+                st.error("Zadajte prosím meno.")
+                return
+            if not first: 
+                st.error("Vyberte aspoň 1. miesto.")
+                return
 
             eval_data = {f"poradie_{s}": 999 for s in current_state['samples_names']}
             if first: eval_data[f"poradie_{first}"] = 1
