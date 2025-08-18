@@ -95,8 +95,8 @@ def get_current_state():
         if settings:
             session_name, is_active, s_count, s_names_json, winner = settings
             s_names = json.loads(s_names_json) if s_names_json else []
-            cursor.execute('SELECT evaluator_name, evaluation_data FROM evaluations WHERE session_name = ?', (session_name,))
-            evaluations = [{'hodnotiteľ': r[0], **json.loads(r[1])} for r in cursor.fetchall()]
+            cursor.execute('SELECT evaluator_name, evaluation_data, comment, created_at FROM evaluations WHERE session_name = ?', (session_name,))
+            evaluations = [{'hodnotiteľ': r[0], 'komentár': r[2], 'čas': r[3], **json.loads(r[1])} for r in cursor.fetchall()]
             return {'session_name': session_name, 'session_active': bool(is_active), 'samples_count': s_count, 'samples_names': s_names, 'evaluations': evaluations, 'winner': winner}
     finally:
         conn.close()
@@ -178,9 +178,7 @@ def get_professional_css():
 ADMIN_PASSWORD_MD5 = hashlib.md5("consumervote24".encode()).hexdigest()
 def verify_password(password): return hashlib.md5(password.encode()).hexdigest() == ADMIN_PASSWORD_MD5
 
-# --- FIX: Centrálna funkcia pre overenie prihlásenia ---
 def authenticate_admin():
-    """Overí session token a nastaví stav prihlásenia. Toto je jediný zdroj pravdy."""
     token = st.session_state.get('admin_session_token')
     if token and verify_admin_session(token):
         st.session_state.admin_authenticated = True
@@ -204,44 +202,69 @@ def qr_display_page():
     components.html(qr_page_html, height=800, scrolling=True)
 
 def results_page():
-    # Overenie prihlásenia je teraz v `main()` funkcii.
     st.markdown(get_professional_css(), unsafe_allow_html=True)
     current_state = get_current_state()
     st.markdown(f'<h1 class="main-title">Výsledky: {current_state["session_name"]}</h1>', unsafe_allow_html=True)
-    if not current_state['evaluations']:
-        st.warning("Pre toto hodnotenie neboli nájdené žiadne záznamy.")
-        return
-    st.markdown('<h2 class="section-title">🏆 Konečné poradie podľa bodov</h2>', unsafe_allow_html=True)
-    scores = {name: 0 for name in current_state['samples_names']}
-    for evaluation in current_state['evaluations']:
-        for sample_name in current_state['samples_names']:
-            rank = evaluation.get(f'poradie_{sample_name}')
-            if rank == 1: scores[sample_name] += 3
-            elif rank == 2: scores[sample_name] += 2
-            elif rank == 3: scores[sample_name] += 1
-    sorted_scores = sorted(scores.items(), key=lambda item: item[1], reverse=True)
-    results_df = pd.DataFrame(sorted_scores, columns=['Vzorka', 'Počet bodov'])
-    results_df.index = results_df.index + 1
-    st.dataframe(results_df, use_container_width=True)
-    st.divider()
-    st.markdown('<h2 class="section-title">🎉 Losovanie výhercu z hodnotiteľov</h2>', unsafe_allow_html=True)
-    if current_state.get('winner'):
-        st.success(f"**Vylosovaný výherca je: {current_state['winner']}**")
-        st.info("Toto losovanie je jednorazové a výherca bol natrvalo uložený.")
-    else:
-        if st.button("🎲 Vylosovať výhercu", type="primary", use_container_width=True):
-            evaluators = list(set(e['hodnotiteľ'] for e in current_state['evaluations']))
-            if evaluators:
-                winner = random.choice(evaluators)
-                save_winner(current_state['session_name'], winner)
-                st.session_state.drawn_winner = winner
-                st.balloons()
-                st.rerun()
-            else:
-                st.error("Nepodarilo sa nájsť žiadnych hodnotiteľov na losovanie.")
-    if 'drawn_winner' in st.session_state:
-        st.success(f"**Vylosovaný výherca je: {st.session_state.drawn_winner}**")
-        del st.session_state.drawn_winner
+    admin_results_section(current_state) # Použijeme rovnakú logiku ako v dashboarde
+
+# --- FIX: Nová/obnovená funkcia pre zobrazenie výsledkov priamo v dashboarde ---
+def admin_results_section(current_state):
+    """Zobrazí výsledky, losovanie a export v expanderi."""
+    with st.expander("Výsledky a export dát", expanded=True):
+        if not current_state['evaluations']:
+            st.info("Zatiaľ žiadne hodnotenia na zobrazenie.")
+            return
+
+        # 1. Výpočet a zobrazenie bodov
+        st.subheader("Poradie podľa bodov")
+        scores = {name: 0 for name in current_state['samples_names']}
+        for evaluation in current_state['evaluations']:
+            for sample_name in current_state['samples_names']:
+                rank = evaluation.get(f'poradie_{sample_name}')
+                if rank == 1: scores[sample_name] += 3
+                elif rank == 2: scores[sample_name] += 2
+                elif rank == 3: scores[sample_name] += 1
+        
+        sorted_scores = sorted(scores.items(), key=lambda item: item[1], reverse=True)
+        results_df = pd.DataFrame(sorted_scores, columns=['Vzorka', 'Počet bodov'])
+        results_df.index = results_df.index + 1
+        st.dataframe(results_df, use_container_width=True)
+        st.divider()
+
+        # 2. Losovanie výhercu
+        st.subheader("Losovanie výhercu")
+        if current_state.get('winner'):
+            st.success(f"**Vylosovaný výherca je: {current_state['winner']}**")
+            st.info("Toto losovanie je jednorazové.")
+        else:
+            if st.button("🎲 Vylosovať výhercu", type="primary", use_container_width=True):
+                evaluators = list(set(e['hodnotiteľ'] for e in current_state['evaluations']))
+                if evaluators:
+                    winner = random.choice(evaluators)
+                    save_winner(current_state['session_name'], winner)
+                    st.session_state.drawn_winner = winner
+                    st.balloons()
+                    st.rerun()
+                else:
+                    st.error("Žiadni hodnotitelia na losovanie.")
+        if 'drawn_winner' in st.session_state:
+            st.success(f"**Vylosovaný výherca je: {st.session_state.drawn_winner}**")
+            del st.session_state.drawn_winner
+        st.divider()
+
+        # 3. Export dát
+        st.subheader("Export dát do CSV")
+        export_df = pd.DataFrame(current_state['evaluations'])
+        if not export_df.empty:
+            csv = export_df.to_csv(index=False).encode('utf-8')
+            st.download_button(
+                label="Stiahnuť všetky dáta (CSV)",
+                data=csv,
+                file_name=f"hodnotenia_{current_state['session_name'].replace(' ', '_')}.csv",
+                mime="text/csv",
+                use_container_width=True
+            )
+            st.dataframe(export_df, use_container_width=True)
 
 def admin_login():
     st.markdown('<h1 class="main-title">Administrácia</h1>', unsafe_allow_html=True)
@@ -252,13 +275,11 @@ def admin_login():
                 token = create_admin_session()
                 if token:
                     st.session_state.admin_session_token = token
-                    st.session_state.admin_authenticated = True
                     st.rerun()
             else:
                 st.error("Nesprávne heslo!")
 
 def admin_dashboard():
-    # Overenie prihlásenia je teraz v `main()` funkcii.
     st.markdown(get_professional_css(), unsafe_allow_html=True)
     current_state = get_current_state()
     col1, col2 = st.columns([4, 1])
@@ -267,8 +288,7 @@ def admin_dashboard():
         if st.button("Odhlásiť"):
             destroy_admin_session(st.session_state.get('admin_session_token'))
             st.session_state.admin_authenticated = False
-            if 'admin_session_token' in st.session_state:
-                del st.session_state['admin_session_token']
+            if 'admin_session_token' in st.session_state: del st.session_state['admin_session_token']
             st.rerun()
     c1, c2, c3 = st.columns(3)
     status_class = "status-active" if current_state['session_active'] else "status-inactive"
@@ -301,9 +321,13 @@ def admin_dashboard():
     else:
         st.warning("Hodnotenie je neaktívne.")
         if current_state['evaluations']:
-             st.link_button("🏆 Zobraziť konečné výsledky a losovanie", "/?mode=results", use_container_width=True)
+             st.link_button("🏆 Zobraziť konečné výsledky", "/?mode=results", use_container_width=True)
+    
     with st.expander("Nastavenia hodnotenia", expanded=not current_state['session_active']):
         admin_settings_section(current_state)
+
+    # Vždy zobrazíme sekciu s výsledkami
+    admin_results_section(current_state)
 
 def admin_settings_section(current_state):
     with st.form("settings_form"):
@@ -363,6 +387,7 @@ def evaluator_interface():
                 st.session_state.evaluation_submitted = True
                 st.rerun()
 
+# --- FIX: Hlavná funkcia ako centrálny smerovač (router) ---
 def main():
     """Hlavná funkcia a smerovač (router) aplikácie."""
     init_database()
@@ -370,35 +395,37 @@ def main():
     
     mode = st.query_params.get('mode', '').lower()
     
-    # --- Centrálny smerovač ---
+    # Smerovač pre špeciálne, full-screen stránky
     if mode == 'qr':
         qr_display_page()
-    elif mode == 'results':
+        return
+    
+    # Zobrazenie sidebaru pre všetky ostatné stránky
+    with st.sidebar:
+        st.title("Menu")
+        # Logika prepínania režimu v sidebare
+        is_admin_mode_selected = (st.radio("Režim:", ["Admin Dashboard", "Hodnotiteľ"], 
+                                           index=0 if st.session_state.get('admin_mode', True) else 1) == "Admin Dashboard")
+        st.session_state.admin_mode = is_admin_mode_selected
+    
+    # Smerovač pre hlavné stránky v obsahu
+    if mode == 'results':
         if st.session_state.admin_authenticated:
             results_page()
         else:
-            st.error("Prístup zamietnutý. Pre zobrazenie výsledkov sa musíte prihlásiť ako administrátor.")
-    elif mode == 'evaluator':
-        evaluator_interface()
-    else:
-        # Predvolená stránka s menu
-        with st.sidebar:
-            st.title("Menu")
-            # Ak je admin prihlásený, začne v dashboarde, inak v režime hodnotiteľa
-            default_index = 0 if st.session_state.admin_authenticated else 1
-            selected_mode = st.radio("Režim:", ["Admin Dashboard", "Hodnotiteľ"], index=default_index)
-        
-        if selected_mode == "Admin Dashboard":
-            if st.session_state.admin_authenticated:
-                admin_dashboard()
-            else:
-                admin_login()
+            st.error("Prístup zamietnutý. Pre zobrazenie výsledkov sa musíte prihlásiť.")
+    elif st.session_state.admin_mode:
+        if st.session_state.admin_authenticated:
+            admin_dashboard()
         else:
-            evaluator_interface()
+            admin_login()
+    else: # Režim hodnotiteľa
+        evaluator_interface()
 
 if __name__ == "__main__":
     if 'session_id' not in st.session_state:
         from streamlit.runtime.scriptrunner import get_script_run_ctx
         st.session_state.session_id = get_script_run_ctx().session_id
+    if 'admin_mode' not in st.session_state: st.session_state.admin_mode = True
     
     main()
