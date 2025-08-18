@@ -178,12 +178,7 @@ def get_professional_css():
 ADMIN_PASSWORD_MD5 = hashlib.md5("consumervote24".encode()).hexdigest()
 def verify_password(password): return hashlib.md5(password.encode()).hexdigest() == ADMIN_PASSWORD_MD5
 
-# --- FIX: Centrálna funkcia pre overenie prihlásenia ---
 def authenticate_admin():
-    """
-    Overí session token pri každom behu skriptu.
-    Toto je jediný zdroj pravdy o prihlásení.
-    """
     token = st.session_state.get('admin_session_token')
     if token and verify_admin_session(token):
         st.session_state.admin_authenticated = True
@@ -194,7 +189,6 @@ def authenticate_admin():
 
 # --- Rôzne stránky aplikácie ---
 def qr_display_page():
-    # Táto funkcia je už v poriadku
     st.markdown("<style>.stSidebar, .stHeader, footer { display: none !important; } .main .block-container { max-width: 100% !important; padding: 0 !important; margin: 0 !important; }</style>", unsafe_allow_html=True)
     current_state = get_current_state()
     if not current_state['session_active']:
@@ -209,7 +203,6 @@ def qr_display_page():
 
 def results_page():
     st.markdown(get_professional_css(), unsafe_allow_html=True)
-    # --- FIX: Použitie centrálneho overenia ---
     if not st.session_state.get('admin_authenticated', False):
         st.error("Prístup zamietnutý. Prosím, prihláste sa ako administrátor.")
         st.warning("Pre návrat na hlavnú stránku obnovte (refresh) stránku alebo použite menu vľavo.")
@@ -274,7 +267,6 @@ def admin_login():
 
 def admin_dashboard():
     st.markdown(get_professional_css(), unsafe_allow_html=True)
-    # --- FIX: Použitie centrálneho overenia ---
     if not st.session_state.get('admin_authenticated', False):
         admin_login()
         return
@@ -342,24 +334,49 @@ def admin_settings_section(current_state):
             if save_evaluation_settings(session_name, samples_count, sample_names, False): st.success("Nastavenia uložené!")
             st.rerun()
 
+# --- FIX: Pridaný QR kód pre zdieľanie na stránke s odpočítavaním ---
 def evaluator_interface():
     st.markdown(get_professional_css(), unsafe_allow_html=True)
     if 'mode' in st.query_params and st.query_params['mode'] == 'evaluator':
         st.markdown("<style>.stSidebar { display: none !important; }</style>", unsafe_allow_html=True)
+    
     current_state = get_current_state()
     st.markdown(f'<h1 class="main-title">{current_state["session_name"]}</h1>', unsafe_allow_html=True)
+    
     if not current_state['session_active']:
         st.error("Hodnotenie momentálne nie je aktívne.")
         return
+
     fingerprint, ip, ua = get_device_fingerprint()
     can_eval, msg = check_device_limit(fingerprint, current_state['session_name'])
+    
     if not can_eval:
         st.warning(msg)
+        st.divider()
+        st.info("Kým čakáte, môžete pozvať ostatných, aby sa zapojili!")
+        
+        app_url = "https://consumervote.streamlit.app"
+        evaluator_url = f"{app_url}/?mode=evaluator"
+        encoded_url = urllib.parse.quote(evaluator_url)
+        
+        qr_html = f"""
+        <html><head><style>
+            body {{ margin: 0; display: flex; flex-direction: column; align-items: center; text-align: center; font-family: sans-serif; }}
+            p {{ margin-bottom: 10px; color: #333; font-weight: 500;}}
+            img {{ max-width: 200px; height: auto; border-radius: 8px; }}
+        </style></head><body>
+            <p>Šírte hodnotenie ďalej</p>
+            <img src="https://api.qrserver.com/v1/create-qr-code/?size=200x200&data={encoded_url}" alt="QR kód na zdieľanie">
+        </body></html>
+        """
+        components.html(qr_html, height=250)
         return
+
     if st.session_state.get('evaluation_submitted', False):
         st.success("Ďakujeme za hodnotenie!")
         if st.button("Nové hodnotenie", type="primary"): st.session_state.evaluation_submitted = False; st.rerun()
         return
+
     with st.form("evaluation_form"):
         evaluator_name = st.text_input("Vaše meno alebo prezývka:")
         options = [''] + current_state['samples_names']
@@ -383,13 +400,10 @@ def evaluator_interface():
 def main():
     """Hlavná funkcia aplikácie"""
     init_database()
-    
-    # Centrálne overenie session pri každom behu
     authenticate_admin()
 
     mode = st.query_params.get('mode', '').lower()
 
-    # Smerovanie na špeciálne stránky
     if mode == 'qr':
         qr_display_page()
         return
@@ -397,7 +411,6 @@ def main():
         results_page()
         return
     
-    # Nastavenie režimu admin/hodnotiteľ
     if mode == 'evaluator':
         st.session_state.admin_mode = False
     
