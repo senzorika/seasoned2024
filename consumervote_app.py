@@ -684,8 +684,15 @@ def verify_password(password, stored_hash):
 def generate_qr_code_url(url, size="200x200", error_correction="M"):
     """Generuje URL pre QR kód pomocou online služby s optimalizáciou pre vonkajšie podmienky"""
     encoded_url = urllib.parse.quote(url, safe='')
-    qr_api_url = f"https://api.qrserver.com/v1/create-qr-code/?size={size}&ecc={error_correction}&color=000000&bgcolor=ffffff&margin=2&data={encoded_url}"
-    return qr_api_url
+    
+    # Skúsime viacero QR API služieb pre lepšiu dostupnosť
+    qr_services = [
+        f"https://api.qrserver.com/v1/create-qr-code/?size={size}&ecc={error_correction}&color=000000&bgcolor=ffffff&margin=2&data={encoded_url}",
+        f"https://chart.googleapis.com/chart?chs={size}&cht=qr&chl={encoded_url}&choe=UTF-8",
+        f"https://qr-code-generator24.com/qr-code-api?size={size}&data={encoded_url}"
+    ]
+    
+    return qr_services[0]  # Začneme s prvou službou
 
 def get_simple_landing_css():
     """Minimalistický CSS pre landing page - len názov a QR kód"""
@@ -759,22 +766,58 @@ def simple_landing_page():
         """, unsafe_allow_html=True)
         return
     
-    # Hlavná landing page
-    app_url = "https://consumervote.streamlit.app"
-    evaluator_url = f"{app_url}?mode=evaluator&hide_sidebar=true"
-    
-    # Veľký QR kód s vysokou error correction
-    large_qr_url = generate_qr_code_url(evaluator_url, size="400x400", error_correction="H")
-    
+    # Hlavný title
     st.markdown(f"""
     <div class="simple-landing">
         <h1 class="simple-title">{current_state['session_name']}</h1>
-        
-        <div class="simple-qr">
-            <img src="{large_qr_url}" alt="QR kód pre hodnotenie" style="max-width: 100%; height: auto;" />
-        </div>
     </div>
     """, unsafe_allow_html=True)
+    
+    # QR kód pomocou Streamlit image (lepšia kompatibilita)
+    app_url = "https://consumervote.streamlit.app"
+    evaluator_url = f"{app_url}?mode=evaluator&hide_sidebar=true"
+    
+    # Skúsime viacero QR služieb
+    qr_urls = [
+        # Google Charts API - zvyčajne najspoľahlivejšie
+        f"https://chart.googleapis.com/chart?chs=400x400&cht=qr&chl={urllib.parse.quote(evaluator_url)}&choe=UTF-8",
+        # QR Server API
+        f"https://api.qrserver.com/v1/create-qr-code/?size=400x400&ecc=H&color=000000&bgcolor=ffffff&margin=2&data={urllib.parse.quote(evaluator_url)}",
+        # Fallback
+        f"https://qr-code-generator24.com/qr-code-api?size=400x400&data={urllib.parse.quote(evaluator_url)}"
+    ]
+    
+    # Centrovaný QR kód pomocou Streamlit
+    col1, col2, col3 = st.columns([1, 2, 1])
+    with col2:
+        qr_loaded = False
+        
+        for i, qr_url in enumerate(qr_urls):
+            try:
+                st.image(qr_url, caption="QR kód pre hodnotenie", width=400)
+                qr_loaded = True
+                break
+            except Exception as e:
+                if i == len(qr_urls) - 1:  # Posledný pokus
+                    st.error("⚠️ Chyba pri načítaní QR kódu")
+                continue
+        
+        if not qr_loaded:
+            st.warning("QR kód sa nepodarilo načítať. Použite priamy odkaz:")
+            st.markdown(f"""
+            <div style="text-align: center; margin: 2rem 0;">
+                <a href="{evaluator_url}" target="_blank" style="
+                    display: inline-block;
+                    padding: 1rem 2rem;
+                    background-color: #007bff;
+                    color: white;
+                    text-decoration: none;
+                    border-radius: 8px;
+                    font-weight: bold;
+                    font-size: 1.2rem;
+                ">📱 Prejsť na hodnotenie</a>
+            </div>
+            """, unsafe_allow_html=True)
 
 def admin_login():
     """Login formulár pre admin s persistent session"""
