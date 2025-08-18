@@ -515,113 +515,243 @@ def get_device_stats(session_name):
     finally:
         conn.close()
 
-def get_mobile_css():
-    """Vráti CSS štýly optimalizované pre mobilné zariadenia"""
+def get_professional_css():
+    """Profesionálne CSS štýly optimalizované pre mobilné zariadenia"""
     return """
     <style>
-    /* Mobile-first responsive design */
+    /* Import modern font */
+    @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap');
+    
+    /* Global mobile-first styles */
+    .stApp {
+        font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+    }
+    
+    /* Mobile container optimization */
     @media screen and (max-width: 768px) {
         .main .block-container {
-            padding-left: 1rem !important;
-            padding-right: 1rem !important;
+            padding: 1rem !important;
             max-width: 100% !important;
         }
     }
     
-    /* Väčšie tlačidlá pre touch */
+    /* Professional buttons */
     .stButton > button {
-        min-height: 3.5rem !important;
-        font-size: 1.1rem !important;
-        font-weight: 600 !important;
-        border-radius: 12px !important;
-        border: 2px solid transparent !important;
-        transition: all 0.2s ease !important;
+        font-family: 'Inter', sans-serif !important;
+        min-height: 48px !important;
+        font-size: 16px !important;
+        font-weight: 500 !important;
+        border-radius: 8px !important;
+        border: 1px solid #e1e5e9 !important;
+        transition: all 0.2s ease-in-out !important;
+        background: #ffffff !important;
+        color: #374151 !important;
+        box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1) !important;
     }
     
     .stButton > button:hover {
-        transform: translateY(-2px) !important;
-        box-shadow: 0 4px 12px rgba(0,0,0,0.15) !important;
+        transform: translateY(-1px) !important;
+        box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15) !important;
+        border-color: #d1d5db !important;
     }
     
-    /* Primárne tlačidlá */
+    /* Primary buttons */
     .stButton > button[kind="primary"] {
-        background: linear-gradient(135deg, #ff6b6b, #ee5a24) !important;
+        background: linear-gradient(135deg, #3b82f6, #1d4ed8) !important;
         color: white !important;
         border: none !important;
     }
     
-    /* Selectboxy optimalizované pre mobile */
-    .stSelectbox > div > div > div {
-        min-height: 3.5rem !important;
-        font-size: 1.1rem !important;
-        border-radius: 12px !important;
-        border: 2px solid #e0e0e0 !important;
+    .stButton > button[kind="primary"]:hover {
+        background: linear-gradient(135deg, #2563eb, #1e40af) !important;
     }
     
-    .stSelectbox > div > div > div:focus-within {
-        border-color: #ff6b6b !important;
-        box-shadow: 0 0 0 3px rgba(255, 107, 107, 0.1) !important;
-    }
-    
-    /* Text inputy */
-    .stTextInput > div > div > input {
-        min-height: 3.5rem !important;
-        font-size: 1.1rem !important;
-        border-radius: 12px !important;
-        border: 2px solid #e0e0e0 !important;
-        padding: 0 1rem !important;
-    }
-    
-    .stTextInput > div > div > input:focus {
-        border-color: #ff6b6b !important;
-        box-shadow: 0 0 0 3px rgba(255, 107, 107, 0.1) !important;
-    }
-    
-    /* Text area */
+    /* Form inputs */
+    .stSelectbox > div > div > div,
+    .stTextInput > div > div > input,
     .stTextArea > div > div > textarea {
-        min-height: 6rem !important;
-        font-size: 1.1rem !important;
-        border-radius: 12px !important;
-        border: 2px solid #e0e0e0 !important;
-        padding: 1rem !important;
+        font-family: 'Inter', sans-serif !important;
+        min-height: 48px !important;
+        font-size: 16px !important;
+        border: 1px solid #d1d5db !important;
+        border-radius: 8px !important;
+        transition: border-color 0.2s ease !important;
     }
     
+    .stSelectbox > div > div > div:focus-within,
+    .stTextInput > div > div > input:focus,
     .stTextArea > div > div > textarea:focus {
-        border-color: #ff6b6b !important;
-        box-shadow: 0 0 0 3px rgba(255, 107, 107, 0.1) !important;
+        border-color: #3b82f6 !important;
+        box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.1) !important;
     }
     
-    /* Progress indicator */
-    .progress-steps {
+    /* Progress steps */
+    .progress-container {
         display: flex;
         justify-content: center;
         align-items: center;
         margin: 2rem 0;
-        flex-wrap: wrap;
+        padding: 0 1rem;
     }
     
     .progress-step {
         width: 40px;
         height: 40px;
         border-radius: 50%;
-        background-color: #e0e0e0;
+        background-color: #f3f4f6;
         display: flex;
         align-items: center;
         justify-content: center;
-        margin: 0 0.5rem;
-        font-weight: bold;
+        margin: 0 8px;
+        font-weight: 600;
+        font-size: 14px;
         transition: all 0.3s ease;
+        color: #6b7280;
     }
     
     .progress-step.active {
-        background-color: #ff6b6b;
+        background-color: #3b82f6;
         color: white;
-        transform: scale(1.1);
+        box-shadow: 0 4px 12px rgba(59, 130, 246, 0.3);
     }
     
     .progress-step.completed {
-        background-color: #2ecc71;
+        background-color: #10b981;
         color: white;
+    }
+    
+    .progress-line {
+        height: 2px;
+        width: 40px;
+        background-color: #f3f4f6;
+        margin: 0 4px;
+        transition: background-color 0.3s ease;
+    }
+    
+    .progress-line.completed {
+        background-color: #10b981;
+    }
+    
+    /* Cards and containers */
+    .professional-card {
+        background: white;
+        border: 1px solid #e5e7eb;
+        border-radius: 12px;
+        padding: 1.5rem;
+        margin: 1rem 0;
+        box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
+    }
+    
+    .status-card {
+        background: #f8fafc;
+        border: 1px solid #e2e8f0;
+        border-radius: 8px;
+        padding: 1rem;
+        margin: 0.5rem 0;
+        text-align: center;
+    }
+    
+    /* Typography */
+    .main-title {
+        font-size: 1.875rem;
+        font-weight: 700;
+        color: #111827;
+        text-align: center;
+        margin-bottom: 1.5rem;
+        line-height: 1.3;
+    }
+    
+    .section-title {
+        font-size: 1.25rem;
+        font-weight: 600;
+        color: #374151;
+        margin: 1.5rem 0 1rem 0;
+    }
+    
+    .subtitle {
+        font-size: 1.125rem;
+        font-weight: 500;
+        color: #4b5563;
+        margin: 1rem 0 0.5rem 0;
+    }
+    
+    /* Status indicators */
+    .status-active {
+        color: #10b981;
+        font-weight: 600;
+    }
+    
+    .status-inactive {
+        color: #ef4444;
+        font-weight: 600;
+    }
+    
+    /* Ranking display */
+    .ranking-item {
+        background: linear-gradient(135deg, #f8fafc, #ffffff);
+        border: 2px solid transparent;
+        border-radius: 12px;
+        padding: 1rem;
+        margin: 0.5rem 0;
+        transition: all 0.3s ease;
+    }
+    
+    .ranking-item.first {
+        background: linear-gradient(135deg, #fef3c7, #fbbf24);
+        border-color: #f59e0b;
+        color: #92400e;
+    }
+    
+    .ranking-item.second {
+        background: linear-gradient(135deg, #f3f4f6, #d1d5db);
+        border-color: #9ca3af;
+        color: #374151;
+    }
+    
+    .ranking-item.third {
+        background: linear-gradient(135deg, #fde68a, #d97706);
+        border-color: #f59e0b;
+        color: #92400e;
+    }
+    
+    /* Alerts */
+    .stAlert {
+        border-radius: 8px !important;
+        border: none !important;
+        font-family: 'Inter', sans-serif !important;
+    }
+    
+    /* Responsive design */
+    @media screen and (max-width: 640px) {
+        .main-title {
+            font-size: 1.5rem;
+        }
+        
+        .section-title {
+            font-size: 1.125rem;
+        }
+        
+        .progress-step {
+            width: 36px;
+            height: 36px;
+            font-size: 12px;
+        }
+        
+        .progress-line {
+            width: 30px;
+        }
+    }
+    
+    /* Loading states */
+    .loading-shimmer {
+        background: linear-gradient(90deg, #f0f0f0 25%, #e0e0e0 50%, #f0f0f0 75%);
+        background-size: 200% 100%;
+        animation: shimmer 2s infinite;
+    }
+    
+    @keyframes shimmer {
+        0% { background-position: -200% 0; }
+        100% { background-position: 200% 0; }
     }
     </style>
     """
@@ -660,7 +790,7 @@ def export_evaluations_to_csv(session_name=None):
     finally:
         conn.close()
 
-# Inicializácia session state pre admin mode
+# Inicializácia session state
 if 'admin_mode' not in st.session_state:
     st.session_state.admin_mode = True  # Začíname na admin
 
@@ -682,7 +812,7 @@ def verify_password(password, stored_hash):
     return hash_password(password) == stored_hash
 
 def generate_qr_code_url(url, size="200x200", error_correction="M"):
-    """Generuje URL pre QR kód pomocou online služby s optimalizáciou pre vonkajšie podmienky"""
+    """Generuje URL pre QR kód pomocou online služby"""
     encoded_url = urllib.parse.quote(url, safe='')
     
     # Skúsime viacero QR API služieb pre lepšiu dostupnosť
@@ -694,53 +824,10 @@ def generate_qr_code_url(url, size="200x200", error_correction="M"):
     
     return qr_services[0]  # Začneme s prvou službou
 
-def get_simple_landing_css():
-    """Minimalistický CSS pre landing page - len názov a QR kód"""
-    return """
-    <style>
-    .simple-landing {
-        background: #ffffff;
-        min-height: 100vh;
-        display: flex;
-        flex-direction: column;
-        align-items: center;
-        justify-content: center;
-        padding: 2rem;
-        text-align: center;
-        font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
-    }
-    
-    .simple-title {
-        font-size: 2.5rem;
-        font-weight: 700;
-        margin-bottom: 3rem;
-        color: #2c3e50;
-    }
-    
-    .simple-qr {
-        background: white;
-        padding: 2rem;
-        border-radius: 20px;
-        box-shadow: 0 4px 20px rgba(0,0,0,0.1);
-        border: 2px solid #e0e0e0;
-    }
-    
-    @media (max-width: 768px) {
-        .simple-title {
-            font-size: 2rem;
-        }
-        
-        .simple-qr {
-            padding: 1.5rem;
-        }
-    }
-    </style>
-    """
-
 def simple_landing_page():
-    """Jednoduchá landing page s len názvom a QR kódom"""
+    """Minimalistická landing page"""
     
-    # Skryť sidebar úplne
+    # Skryť sidebar
     st.markdown("""
     <style>
     .stSidebar {
@@ -749,78 +836,108 @@ def simple_landing_page():
     .main > div {
         padding-top: 0rem;
     }
+    body {
+        background-color: #f8fafc;
+    }
+    .landing-container {
+        min-height: 100vh;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        padding: 2rem;
+        text-align: center;
+        background-color: #f8fafc;
+    }
+    .landing-title {
+        font-family: 'Inter', sans-serif;
+        font-size: 2.5rem;
+        font-weight: 700;
+        color: #111827;
+        margin-bottom: 3rem;
+        line-height: 1.2;
+    }
+    .qr-container {
+        background: white;
+        padding: 2rem;
+        border-radius: 16px;
+        box-shadow: 0 4px 20px rgba(0, 0, 0, 0.1);
+        border: 1px solid #e5e7eb;
+    }
+    @media (max-width: 768px) {
+        .landing-title {
+            font-size: 1.875rem;
+        }
+        .qr-container {
+            padding: 1.5rem;
+        }
+    }
     </style>
     """, unsafe_allow_html=True)
-    
-    # Aplikuj minimalistický CSS
-    st.markdown(get_simple_landing_css(), unsafe_allow_html=True)
     
     # Získanie aktuálneho stavu
     current_state = get_current_state()
     
     if not current_state['session_active']:
         st.markdown("""
-        <div class="simple-landing">
-            <h1 class="simple-title">❌ Hodnotenie nie je aktívne</h1>
+        <div class="landing-container">
+            <h1 class="landing-title">Hodnotenie nie je aktívne</h1>
         </div>
         """, unsafe_allow_html=True)
         return
     
-    # Hlavný title
+    # Hlavný obsah
     st.markdown(f"""
-    <div class="simple-landing">
-        <h1 class="simple-title">{current_state['session_name']}</h1>
+    <div class="landing-container">
+        <h1 class="landing-title">{current_state['session_name']}</h1>
     </div>
     """, unsafe_allow_html=True)
     
-    # QR kód pomocou Streamlit image (lepšia kompatibilita)
+    # QR kód
     app_url = "https://consumervote.streamlit.app"
     evaluator_url = f"{app_url}?mode=evaluator&hide_sidebar=true"
     
     # Skúsime viacero QR služieb
     qr_urls = [
-        # Google Charts API - zvyčajne najspoľahlivejšie
         f"https://chart.googleapis.com/chart?chs=400x400&cht=qr&chl={urllib.parse.quote(evaluator_url)}&choe=UTF-8",
-        # QR Server API
-        f"https://api.qrserver.com/v1/create-qr-code/?size=400x400&ecc=H&color=000000&bgcolor=ffffff&margin=2&data={urllib.parse.quote(evaluator_url)}",
-        # Fallback
-        f"https://qr-code-generator24.com/qr-code-api?size=400x400&data={urllib.parse.quote(evaluator_url)}"
+        f"https://api.qrserver.com/v1/create-qr-code/?size=400x400&ecc=H&color=000000&bgcolor=ffffff&margin=2&data={urllib.parse.quote(evaluator_url)}"
     ]
     
-    # Centrovaný QR kód pomocou Streamlit
+    # Centrovaný QR kód
     col1, col2, col3 = st.columns([1, 2, 1])
     with col2:
         qr_loaded = False
         
         for i, qr_url in enumerate(qr_urls):
             try:
-                st.image(qr_url, caption="QR kód pre hodnotenie", width=400)
+                st.markdown('<div class="qr-container">', unsafe_allow_html=True)
+                st.image(qr_url, width=400)
+                st.markdown('</div>', unsafe_allow_html=True)
                 qr_loaded = True
                 break
             except Exception as e:
                 if i == len(qr_urls) - 1:  # Posledný pokus
-                    st.error("⚠️ Chyba pri načítaní QR kódu")
+                    st.error("Chyba pri načítaní QR kódu")
                 continue
         
         if not qr_loaded:
-            st.warning("QR kód sa nepodarilo načítať. Použite priamy odkaz:")
             st.markdown(f"""
             <div style="text-align: center; margin: 2rem 0;">
                 <a href="{evaluator_url}" target="_blank" style="
                     display: inline-block;
                     padding: 1rem 2rem;
-                    background-color: #007bff;
+                    background-color: #3b82f6;
                     color: white;
                     text-decoration: none;
                     border-radius: 8px;
-                    font-weight: bold;
-                    font-size: 1.2rem;
-                ">📱 Prejsť na hodnotenie</a>
+                    font-weight: 600;
+                    font-size: 1.125rem;
+                ">Prejsť na hodnotenie</a>
             </div>
             """, unsafe_allow_html=True)
 
 def admin_login():
-    """Login formulár pre admin s persistent session"""
+    """Login formulár pre admin"""
     
     # Kontrola existujúcej session
     if st.session_state.admin_session_token:
@@ -828,12 +945,12 @@ def admin_login():
             st.session_state.admin_authenticated = True
             st.rerun()
     
-    st.title("🔐 Admin Dashboard")
+    st.markdown('<h1 class="main-title">Administrácia</h1>', unsafe_allow_html=True)
     st.write("Zadajte heslo pre prístup k administrácii:")
     
     with st.form("admin_login_form"):
         password = st.text_input("Heslo:", type="password", placeholder="Zadajte admin heslo")
-        submitted = st.form_submit_button("🔓 Prihlásiť sa", type="primary")
+        submitted = st.form_submit_button("Prihlásiť sa", type="primary")
         
         if submitted:
             if verify_password(password, ADMIN_PASSWORD_MD5):
@@ -850,10 +967,10 @@ def admin_login():
                         success=True
                     )
                     
-                    st.success("✅ Úspešne prihlásený!")
+                    st.success("Úspešne prihlásený!")
                     st.rerun()
                 else:
-                    st.error("❌ Chyba pri vytváraní session!")
+                    st.error("Chyba pri vytváraní session!")
             else:
                 # Audit log pre neúspešné prihlásenie
                 log_audit_action(
@@ -861,15 +978,18 @@ def admin_login():
                     action_description="Neúspešný pokus o prihlásenie admina",
                     success=False
                 )
-                st.error("❌ Nesprávne heslo!")
+                st.error("Nesprávne heslo!")
     
     st.divider()
-    if st.button("👥 Prejsť na hodnotenie"):
+    if st.button("Prejsť na hodnotenie"):
         st.session_state.admin_mode = False
         st.rerun()
 
 def admin_dashboard():
     """Admin dashboard rozhranie"""
+    
+    # Aplikuj profesionálne CSS
+    st.markdown(get_professional_css(), unsafe_allow_html=True)
     
     # Kontrola autentifikácie
     if not st.session_state.admin_authenticated:
@@ -880,18 +1000,18 @@ def admin_dashboard():
     if not verify_admin_session(st.session_state.admin_session_token):
         st.session_state.admin_authenticated = False
         st.session_state.admin_session_token = None
-        st.error("⚠️ Session expirovala. Prihláste sa znovu.")
+        st.error("Session expirovala. Prihláste sa znovu.")
         st.rerun()
     
     # Získanie aktuálneho stavu
     current_state = get_current_state()
     
-    # Header s možnosťou odhlásenia
+    # Header
     col1, col2 = st.columns([4, 1])
     with col1:
-        st.title("📊 Admin Dashboard")
+        st.markdown('<h1 class="main-title">Dashboard</h1>', unsafe_allow_html=True)
     with col2:
-        if st.button("🚪 Odhlásiť"):
+        if st.button("Odhlásiť"):
             destroy_admin_session(st.session_state.admin_session_token)
             st.session_state.admin_authenticated = False
             st.session_state.admin_session_token = None
@@ -902,17 +1022,39 @@ def admin_dashboard():
     
     col1, col2, col3, col4 = st.columns(4)
     with col1:
-        st.metric(
-            "📋 Session Status", 
-            "✅ Aktívna" if current_state['session_active'] else "❌ Neaktívna",
-            current_state['session_name']
-        )
+        status_text = "AKTÍVNA" if current_state['session_active'] else "NEAKTÍVNA"
+        status_class = "status-active" if current_state['session_active'] else "status-inactive"
+        st.markdown(f"""
+        <div class="professional-card">
+            <h4>Session Status</h4>
+            <p class="{status_class}">{status_text}</p>
+            <small>{current_state['session_name']}</small>
+        </div>
+        """, unsafe_allow_html=True)
+    
     with col2:
-        st.metric("🧪 Vzorky", current_state['samples_count'])
+        st.markdown(f"""
+        <div class="professional-card">
+            <h4>Vzorky</h4>
+            <p style="font-size: 1.5rem; font-weight: 600; color: #3b82f6;">{current_state['samples_count']}</p>
+        </div>
+        """, unsafe_allow_html=True)
+    
     with col3:
-        st.metric("📝 Hodnotenia", len(current_state['evaluations']))
+        st.markdown(f"""
+        <div class="professional-card">
+            <h4>Hodnotenia</h4>
+            <p style="font-size: 1.5rem; font-weight: 600; color: #10b981;">{len(current_state['evaluations'])}</p>
+        </div>
+        """, unsafe_allow_html=True)
+    
     with col4:
-        st.metric("📱 Zariadenia", device_stats['unique_devices'])
+        st.markdown(f"""
+        <div class="professional-card">
+            <h4>Zariadenia</h4>
+            <p style="font-size: 1.5rem; font-weight: 600; color: #f59e0b;">{device_stats['unique_devices']}</p>
+        </div>
+        """, unsafe_allow_html=True)
     
     st.divider()
     
@@ -921,7 +1063,7 @@ def admin_dashboard():
         col1, col2 = st.columns([2, 1])
         
         with col1:
-            st.subheader("🔗 QR kód pre hodnotiteľov")
+            st.markdown('<h2 class="section-title">QR kód pre hodnotiteľov</h2>', unsafe_allow_html=True)
             
             # URL aplikácie
             app_url = "https://consumervote.streamlit.app"
@@ -932,7 +1074,9 @@ def admin_dashboard():
             
             col_qr1, col_qr2, col_qr3 = st.columns([1, 2, 1])
             with col_qr2:
+                st.markdown('<div class="professional-card">', unsafe_allow_html=True)
                 st.image(qr_image_url, width=300)
+                st.markdown('</div>', unsafe_allow_html=True)
             
             # Akčné tlačidlá
             col_btn1, col_btn2 = st.columns(2)
@@ -942,7 +1086,7 @@ def admin_dashboard():
                 <a href="{landing_url}" target="_blank" style="
                     display: inline-block;
                     padding: 0.75rem 1.5rem;
-                    background-color: #2ecc71;
+                    background-color: #10b981;
                     color: white;
                     text-decoration: none;
                     border-radius: 8px;
@@ -950,7 +1094,7 @@ def admin_dashboard():
                     text-align: center;
                     width: 100%;
                     box-sizing: border-box;
-                ">🖼️ Otvoriť Landing Page</a>
+                ">Otvoriť Landing Page</a>
                 """, unsafe_allow_html=True)
             
             with col_btn2:
@@ -959,7 +1103,7 @@ def admin_dashboard():
                 <a href="{evaluator_url}" target="_blank" style="
                     display: inline-block;
                     padding: 0.75rem 1.5rem;
-                    background-color: #3498db;
+                    background-color: #3b82f6;
                     color: white;
                     text-decoration: none;
                     border-radius: 8px;
@@ -967,41 +1111,41 @@ def admin_dashboard():
                     text-align: center;
                     width: 100%;
                     box-sizing: border-box;
-                ">📱 Priame Hodnotenie</a>
+                ">Priame Hodnotenie</a>
                 """, unsafe_allow_html=True)
         
         with col2:
-            st.subheader("⚙️ Rýchle akcie")
+            st.markdown('<h2 class="section-title">Rýchle akcie</h2>', unsafe_allow_html=True)
             
-            if st.button("🔄 Reset hodnotení", use_container_width=True):
+            if st.button("Reset hodnotení", use_container_width=True):
                 if clear_evaluations_for_session(current_state['session_name']):
-                    st.success("✅ Hodnotenia vymazané!")
+                    st.success("Hodnotenia vymazané!")
                     st.rerun()
                 else:
-                    st.error("❌ Chyba pri mazaní!")
+                    st.error("Chyba pri mazaní!")
             
-            if st.button("⏹️ Zastaviť hodnotenie", use_container_width=True):
+            if st.button("Zastaviť hodnotenie", use_container_width=True):
                 if save_evaluation_settings(current_state['session_name'], current_state['samples_count'], current_state['samples_names'], False):
-                    st.success("✅ Hodnotenie zastavené!")
+                    st.success("Hodnotenie zastavené!")
                     st.rerun()
                 else:
-                    st.error("❌ Chyba!")
+                    st.error("Chyba!")
             
-            if st.button("👥 Prejsť na hodnotenie", use_container_width=True):
+            if st.button("Prejsť na hodnotenie", use_container_width=True):
                 st.session_state.admin_mode = False
                 st.rerun()
     
     else:
-        st.warning("⚠️ Hodnotenie nie je aktívne. Nastavte ho v sekcii Nastavenia.")
+        st.warning("Hodnotenie nie je aktívne. Nastavte ho v sekcii Nastavenia.")
     
     # Expandable sekcie
-    with st.expander("⚙️ Nastavenia hodnotenia", expanded=not current_state['session_active']):
+    with st.expander("Nastavenia hodnotenia", expanded=not current_state['session_active']):
         admin_settings_section(current_state)
     
-    with st.expander("📊 Výsledky a export"):
+    with st.expander("Výsledky a export"):
         admin_results_section(current_state)
     
-    with st.expander("🔧 Systémové informácie"):
+    with st.expander("Systémové informácie"):
         admin_system_section(current_state, device_stats)
 
 def admin_settings_section(current_state):
@@ -1009,21 +1153,21 @@ def admin_settings_section(current_state):
     
     # Názov session/akcie
     session_name = st.text_input(
-        "📋 Názov hodnotenia/akcie:",
+        "Názov hodnotenia/akcie:",
         value=current_state['session_name'],
         placeholder="Napr. Hodnotenie letnej ponuky 2024"
     )
     
     # Počet vzoriek
     samples_count = st.number_input(
-        "🧪 Počet vzoriek:",
+        "Počet vzoriek:",
         min_value=2,
         max_value=20,
         value=current_state['samples_count'] if current_state['samples_count'] > 0 else 3
     )
     
     # Názvy vzoriek
-    st.write("**🏷️ Názvy vzoriek:**")
+    st.write("**Názvy vzoriek:**")
     sample_names = []
     
     for i in range(samples_count):
@@ -1039,37 +1183,37 @@ def admin_settings_section(current_state):
     col1, col2 = st.columns(2)
     
     with col1:
-        if st.button("💾 Uložiť a Spustiť", type="primary", use_container_width=True):
+        if st.button("Uložiť a Spustiť", type="primary", use_container_width=True):
             if save_evaluation_settings(session_name, samples_count, sample_names, True):
-                st.success("✅ Nastavenia uložené a hodnotenie spustené!")
+                st.success("Nastavenia uložené a hodnotenie spustené!")
                 st.rerun()
             else:
-                st.error("❌ Chyba pri ukladaní!")
+                st.error("Chyba pri ukladaní!")
     
     with col2:
-        if st.button("💾 Uložiť bez spustenia", use_container_width=True):
+        if st.button("Uložiť bez spustenia", use_container_width=True):
             if save_evaluation_settings(session_name, samples_count, sample_names, False):
-                st.success("✅ Nastavenia uložené!")
+                st.success("Nastavenia uložené!")
                 st.rerun()
             else:
-                st.error("❌ Chyba pri ukladaní!")
+                st.error("Chyba pri ukladaní!")
 
 def admin_results_section(current_state):
     """Sekcia výsledkov v dashboarde"""
     
     if not current_state['evaluations']:
-        st.info("📝 Zatiaľ žiadne hodnotenia")
+        st.info("Zatiaľ žiadne hodnotenia")
         return
     
     # Export tlačidlá
     col1, col2 = st.columns(2)
     with col1:
-        if st.button("📥 Export CSV (aktuálna session)", use_container_width=True):
+        if st.button("Export CSV (aktuálna session)", use_container_width=True):
             df = export_evaluations_to_csv(current_state['session_name'])
             if not df.empty:
                 csv = df.to_csv(index=False)
                 st.download_button(
-                    label="⬇️ Stiahnuť CSV",
+                    label="Stiahnuť CSV",
                     data=csv,
                     file_name=f"hodnotenia_{current_state['session_name'].replace(' ', '_')}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv",
                     mime="text/csv",
@@ -1077,12 +1221,12 @@ def admin_results_section(current_state):
                 )
     
     with col2:
-        if st.button("📥 Export CSV (všetky sessions)", use_container_width=True):
+        if st.button("Export CSV (všetky sessions)", use_container_width=True):
             df = export_evaluations_to_csv()
             if not df.empty:
                 csv = df.to_csv(index=False)
                 st.download_button(
-                    label="⬇️ Stiahnuť všetky CSV",
+                    label="Stiahnuť všetky CSV",
                     data=csv,
                     file_name=f"hodnotenia_vsetky_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv",
                     mime="text/csv",
@@ -1090,7 +1234,7 @@ def admin_results_section(current_state):
                 )
     
     # Zobrazenie posledných hodnotení
-    st.write("**📋 Posledných 10 hodnotení:**")
+    st.write("**Posledných 10 hodnotení:**")
     df_display = pd.DataFrame(current_state['evaluations'][-10:])
     st.dataframe(df_display, use_container_width=True)
 
@@ -1100,9 +1244,9 @@ def admin_system_section(current_state, device_stats):
     col1, col2 = st.columns(2)
     
     with col1:
-        st.write("**📊 Session informácie:**")
+        st.write("**Session informácie:**")
         st.write(f"• Názov: {current_state['session_name']}")
-        st.write(f"• Status: {'✅ Aktívna' if current_state['session_active'] else '❌ Neaktívna'}")
+        st.write(f"• Status: {'AKTÍVNA' if current_state['session_active'] else 'NEAKTÍVNA'}")
         st.write(f"• Vzorky: {current_state['samples_count']}")
         st.write(f"• Hodnotenia: {len(current_state['evaluations'])}")
         
@@ -1110,49 +1254,49 @@ def admin_system_section(current_state, device_stats):
             st.write(f"• Posledná aktivita: {device_stats['last_activity']}")
     
     with col2:
-        st.write("**🗄️ Databáza:**")
+        st.write("**Databáza:**")
         try:
             if os.path.exists("consumervote.db"):
                 db_size = os.path.getsize("consumervote.db") / 1024
                 st.write(f"• Veľkosť: {db_size:.1f} KB")
-                st.write("• Status: ✅ Pripojená")
+                st.write("• Status: Pripojená")
             else:
-                st.write("• Status: ⚠️ Inicializuje sa...")
+                st.write("• Status: Inicializuje sa...")
         except:
-            st.write("• Status: ❌ Problém")
+            st.write("• Status: Problém")
         
         st.write(f"• Jedinečné zariadenia: {device_stats['unique_devices']}")
         st.write(f"• Celkové hodnotenia: {device_stats['total_evaluations']}")
     
     # Reset device tracking
     if device_stats['unique_devices'] > 0:
-        if st.button("🔄 Reset zariadení (umožní opätovné hodnotenie)", use_container_width=True):
+        if st.button("Reset zariadení (umožní opätovné hodnotenie)", use_container_width=True):
             conn = sqlite3.connect("consumervote.db")
             cursor = conn.cursor()
             try:
                 cursor.execute('DELETE FROM device_tracking WHERE session_name = ?', (current_state['session_name'],))
                 conn.commit()
-                st.success("✅ Device tracking resetovaný!")
+                st.success("Device tracking resetovaný!")
                 st.rerun()
             except Exception as e:
-                st.error(f"❌ Chyba: {e}")
+                st.error(f"Chyba: {e}")
             finally:
                 conn.close()
 
 def evaluator_interface():
-    """Mobile-first rozhranie pre hodnotiteľov"""
+    """Rozhranie pre hodnotiteľov"""
     
-    # Aplikuj mobile CSS
-    st.markdown(get_mobile_css(), unsafe_allow_html=True)
+    # Aplikuj profesionálne CSS
+    st.markdown(get_professional_css(), unsafe_allow_html=True)
     
     # Získanie aktuálneho stavu
     current_state = get_current_state()
     
-    # Mobile optimalizovaný title
-    st.markdown(f'<h1 style="font-size: 1.8rem; font-weight: 700; text-align: center; margin-bottom: 1rem; color: #2c3e50;">🧪 {current_state["session_name"]}</h1>', unsafe_allow_html=True)
+    # Hlavný title
+    st.markdown(f'<h1 class="main-title">{current_state["session_name"]}</h1>', unsafe_allow_html=True)
     
     if not current_state['session_active']:
-        st.error("❌ Hodnotenie nie je aktívne. Kontaktujte administrátora.")
+        st.error("Hodnotenie nie je aktívne. Kontaktujte administrátora.")
         return
     
     # Kontrola device limitu
@@ -1162,9 +1306,9 @@ def evaluator_interface():
     )
     
     if not can_evaluate:
-        st.warning(f"⏰ {message}")
+        st.warning(f"Príliš skoré hodnotenie: {message}")
         if eval_count > 0:
-            st.info(f"✅ Z tohto zariadenia už bolo odoslaných {eval_count} hodnotení")
+            st.info(f"Z tohto zariadenia už bolo odoslaných {eval_count} hodnotení")
         return
     
     # Progress indicator
@@ -1175,11 +1319,11 @@ def evaluator_interface():
         step = 3
     
     st.markdown(f"""
-    <div class="progress-steps">
+    <div class="progress-container">
         <div class="progress-step {'completed' if step > 1 else 'active' if step == 1 else ''}">1</div>
-        <div style="width: 20px; height: 2px; background-color: {'#2ecc71' if step > 1 else '#e0e0e0'}; margin: 0 0.5rem;"></div>
+        <div class="progress-line {'completed' if step > 1 else ''}"></div>
         <div class="progress-step {'completed' if step > 2 else 'active' if step == 2 else ''}">2</div>
-        <div style="width: 20px; height: 2px; background-color: {'#2ecc71' if step > 2 else '#e0e0e0'}; margin: 0 0.5rem;"></div>
+        <div class="progress-line {'completed' if step > 2 else ''}"></div>
         <div class="progress-step {'active' if step == 3 else ''}">3</div>
     </div>
     """, unsafe_allow_html=True)
@@ -1192,10 +1336,10 @@ def evaluator_interface():
     
     # Ak bolo hodnotenie úspešne odoslané
     if st.session_state.evaluation_submitted:
-        st.success("🎉 Ďakujeme za hodnotenie!")
+        st.success("Ďakujeme za hodnotenie!")
         st.balloons()
         
-        if st.button("🔄 Nové hodnotenie", type="primary"):
+        if st.button("Nové hodnotenie", type="primary"):
             st.session_state.evaluation_submitted = False
             st.session_state.show_confirmation = False
             st.rerun()
@@ -1205,29 +1349,29 @@ def evaluator_interface():
     # Krok 1: Hlavný formulár
     if not st.session_state.show_confirmation:
         
-        st.info("📝 Vyberte TOP 3 vzorky v poradí od najlepšej po tretiu najlepšiu")
+        st.info("Vyberte TOP 3 vzorky v poradí od najlepšej po tretiu najlepšiu")
         
         # Meno hodnotiteľa
-        st.subheader("👤 Vaše meno")
+        st.markdown('<h2 class="section-title">Vaše meno</h2>', unsafe_allow_html=True)
         evaluator_name = st.text_input("", placeholder="Zadajte vaše meno alebo prezývku", label_visibility="collapsed")
         
-        st.subheader("🏆 TOP 3 vzorky")
+        st.markdown('<h2 class="section-title">TOP 3 vzorky</h2>', unsafe_allow_html=True)
         
         # 1. miesto
-        st.markdown("### 🥇 1. miesto")
+        st.markdown('<h3 class="subtitle">1. miesto - Najlepšia vzorka</h3>', unsafe_allow_html=True)
         first_place = st.selectbox("", options=['Vyberte vzorku...'] + current_state['samples_names'], key="first_place_select", label_visibility="collapsed")
         if first_place == 'Vyberte vzorku...':
             first_place = None
         
         # 2. miesto
-        st.markdown("### 🥈 2. miesto")
+        st.markdown('<h3 class="subtitle">2. miesto - Druhá najlepšia</h3>', unsafe_allow_html=True)
         available_for_second = [s for s in current_state['samples_names'] if s != first_place]
         second_place = st.selectbox("", options=['Vyberte vzorku...'] + available_for_second, key="second_place_select", label_visibility="collapsed")
         if second_place == 'Vyberte vzorku...':
             second_place = None
         
         # 3. miesto
-        st.markdown("### 🥉 3. miesto")
+        st.markdown('<h3 class="subtitle">3. miesto - Tretia najlepšia</h3>', unsafe_allow_html=True)
         available_for_third = [s for s in current_state['samples_names'] if s != first_place and s != second_place]
         third_place = st.selectbox("", options=['Vyberte vzorku...'] + available_for_third, key="third_place_select", label_visibility="collapsed")
         if third_place == 'Vyberte vzorku...':
@@ -1244,21 +1388,25 @@ def evaluator_interface():
         
         # Zobrazenie súhrnu
         if selected_samples:
-            st.subheader("📋 Váš výber")
+            st.markdown('<h2 class="section-title">Váš výber</h2>', unsafe_allow_html=True)
             for place, sample in selected_samples.items():
-                medal = "🥇" if place == "1" else "🥈" if place == "2" else "🥉"
-                st.success(f"{medal} **{place}. miesto**: {sample}")
+                rank_class = "first" if place == "1" else "second" if place == "2" else "third"
+                st.markdown(f"""
+                <div class="ranking-item {rank_class}">
+                    <strong>{place}. miesto:</strong> {sample}
+                </div>
+                """, unsafe_allow_html=True)
         
         # Komentár
-        st.subheader("💬 Komentár (voliteľný)")
+        st.markdown('<h2 class="section-title">Komentár (voliteľný)</h2>', unsafe_allow_html=True)
         comment = st.text_area("", placeholder="Váš komentár k hodnoteniu...", label_visibility="collapsed", height=100)
         
         # Tlačidlo pokračovať
-        if st.button("📤 Pokračovať na kontrolu", type="primary", use_container_width=True):
+        if st.button("Pokračovať na kontrolu", type="primary", use_container_width=True):
             if not evaluator_name.strip():
-                st.error("❌ Prosím zadajte vaše meno!")
+                st.error("Prosím zadajte vaše meno!")
             elif not selected_samples:
-                st.error("❌ Prosím vyberte aspoň jednu vzorku!")
+                st.error("Prosím vyberte aspoň jednu vzorku!")
             else:
                 st.session_state.temp_evaluation = {
                     'session_name': current_state['session_name'],
@@ -1274,21 +1422,23 @@ def evaluator_interface():
     
     # Krok 2: Potvrdzovacie okno
     else:
-        st.subheader("✅ Kontrola hodnotenia")
+        st.markdown('<h2 class="section-title">Kontrola hodnotenia</h2>', unsafe_allow_html=True)
         
         temp_eval = st.session_state.temp_evaluation
         
-        st.info(f"👤 **{temp_eval['evaluator_name']}** - {temp_eval['session_name']}")
+        st.markdown(f"""
+        <div class="status-card">
+            <strong>{temp_eval['evaluator_name']}</strong><br>
+            <small>{temp_eval['session_name']}</small>
+        </div>
+        """, unsafe_allow_html=True)
         
         # Výsledky hodnotenia
         for place, sample in temp_eval['selected_samples'].items():
-            medal = "🥇" if place == "1" else "🥈" if place == "2" else "🥉"
-            color = "#ffd700" if place == "1" else "#c0c0c0" if place == "2" else "#cd7f32"
-            
+            rank_class = "first" if place == "1" else "second" if place == "2" else "third"
             st.markdown(f"""
-            <div style="background-color: {color}; padding: 1rem; border-radius: 12px; margin: 0.5rem 0; text-align: center; color: {'black' if place != '3' else 'white'};">
-                <h4>{medal} {place}. miesto</h4>
-                <p style="margin: 0; font-weight: bold;">{sample}</p>
+            <div class="ranking-item {rank_class}">
+                <strong>{place}. miesto:</strong> {sample}
             </div>
             """, unsafe_allow_html=True)
         
@@ -1299,7 +1449,7 @@ def evaluator_interface():
         col1, col2 = st.columns(2)
         
         with col1:
-            if st.button("✅ Potvrdiť", type="primary", use_container_width=True):
+            if st.button("Potvrdiť", type="primary", use_container_width=True):
                 # Príprava dát
                 evaluation_data = {}
                 for sample_name in current_state['samples_names']:
@@ -1323,10 +1473,10 @@ def evaluator_interface():
                         del st.session_state.temp_evaluation
                     st.rerun()
                 else:
-                    st.error("❌ Chyba pri ukladaní!")
+                    st.error("Chyba pri ukladaní!")
         
         with col2:
-            if st.button("❌ Späť", use_container_width=True):
+            if st.button("Späť", use_container_width=True):
                 st.session_state.show_confirmation = False
                 st.rerun()
 
@@ -1376,31 +1526,34 @@ def main():
     # Získanie aktuálneho stavu
     current_state = get_current_state()
     
+    # Aplikuj profesionálne CSS aj pre sidebar
+    st.markdown(get_professional_css(), unsafe_allow_html=True)
+    
     # Sidebar pre navigáciu
     with st.sidebar:
-        st.title("🧪 Hodnotenie vzoriek")
+        st.title("Hodnotenie vzoriek")
         
         # Zobrazenie aktuálnej session
         if current_state['session_active']:
-            st.success(f"📋 **{current_state['session_name']}**")
+            st.success(f"**{current_state['session_name']}**")
             st.metric("Hodnotenia", len(current_state['evaluations']))
         else:
-            st.warning("⚠️ Hodnotenie neaktívne")
+            st.warning("Hodnotenie neaktívne")
         
         if st.session_state.admin_authenticated:
-            st.success("✅ Admin prihlásený")
+            st.success("Admin prihlásený")
         else:
-            st.info("🔐 Admin neprihlásený")
+            st.info("Admin neprihlásený")
         
         mode = st.radio(
             "Vyberte režim:",
-            ["🔧 Admin Dashboard", "👥 Hodnotiteľ"],
+            ["Admin Dashboard", "Hodnotiteľ"],
             index=0 if st.session_state.admin_mode else 1
         )
         
-        st.session_state.admin_mode = (mode == "🔧 Admin Dashboard")
+        st.session_state.admin_mode = (mode == "Admin Dashboard")
         
-        if st.session_state.admin_authenticated and st.button("🚪 Rýchle odhlásenie", use_container_width=True):
+        if st.session_state.admin_authenticated and st.button("Rýchle odhlásenie", use_container_width=True):
             destroy_admin_session(st.session_state.admin_session_token)
             st.session_state.admin_authenticated = False
             st.session_state.admin_session_token = None
