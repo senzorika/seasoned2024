@@ -148,7 +148,7 @@ def get_device_fingerprint():
     ip, ua = get_client_info()
     return hashlib.md5(f"{ip}:{ua}".encode()).hexdigest(), ip, ua
 
-def check_device_limit(session_name, device_fingerprint):
+def check_device_limit(device_fingerprint, session_name):
     conn = sqlite3.connect("consumervote.db")
     cursor = conn.cursor()
     try:
@@ -186,7 +186,6 @@ def clear_evaluations_for_session(session_name):
     finally:
         conn.close()
 
-# --- CSS a pomocné funkcie (bez zmien) ---
 def get_professional_css():
     return """
     <style>
@@ -207,65 +206,102 @@ ADMIN_PASSWORD_MD5 = hashlib.md5("consumervote24".encode()).hexdigest()
 def verify_password(password):
     return hashlib.md5(password.encode()).hexdigest() == ADMIN_PASSWORD_MD5
 
-# --- NOVÁ STRÁNKA PRE ZOBRAZENIE IBA QR KÓDU ---
+# --- FIX: Kompletne prerobená funkcia pre zobrazenie QR kódu ---
 def qr_display_page():
-    """Zobrazí čistú stránku iba s QR kódom, ideálnu pre verejný monitor."""
+    """Zobrazí čistú, fullscreen stránku s QR kódom, ideálnu pre verejný monitor."""
+    
+    # Skryje všetky UI prvky Streamlitu a nastaví pozadie
     st.markdown("""
     <style>
-        .stSidebar, .stHeader, footer { display: none !important; }
-        .main .block-container { padding: 1rem !important; }
-        body { background-color: #f0f2f6; }
-        .qr-display-container {
-            display: flex;
-            flex-direction: column;
-            justify-content: center;
-            align-items: center;
-            height: 95vh;
-            text-align: center;
+        /* Skrytie nepotrebných Streamlit elementov */
+        .stSidebar, .stHeader, footer, .main > div:first-child > div:first-child > div:first-child { 
+            display: none !important; 
         }
-        .qr-card {
-            background: white;
-            padding: 2rem;
-            border-radius: 1rem;
-            box-shadow: 0 8px 32px rgba(0,0,0,0.1);
+        /* Roztiahnutie hlavného kontajnera na celú šírku */
+        .main .block-container { 
+            max-width: 100% !important;
+            padding: 0 !important;
+            margin: 0 !important;
         }
     </style>
     """, unsafe_allow_html=True)
 
     current_state = get_current_state()
-    st.markdown('<div class="qr-display-container">', unsafe_allow_html=True)
 
+    # Ak session nie je aktívna, zobrazí sa centrovaná chybová hláška
     if not current_state['session_active']:
-        st.error("Hodnotenie nie je aktívne.")
-    else:
-        st.markdown(f'<h2>{current_state["session_name"]}</h2>', unsafe_allow_html=True)
-        st.write("Naskenujte kód pre hodnotenie:")
-        
-        app_url = "https://consumervote.streamlit.app"
-        evaluator_url = f"{app_url}/?mode=evaluator"
-        encoded_url = urllib.parse.quote(evaluator_url)
-        qr_services = [
-            f"https://api.qrserver.com/v1/create-qr-code/?size=400x400&data={encoded_url}",
-            f"https://quickchart.io/qr?text={encoded_url}&size=400"
-        ]
-        
-        qr_html = f"""
-        <html><head><style>body {{ margin: 0; }}</style></head><body>
-            <div id="qr-0"><img src="{qr_services[0]}" alt="QR Code" onerror="this.parentElement.style.display='none'; document.getElementById('qr-1').style.display='block';"></div>
-            <div id="qr-1" style="display:none;"><img src="{qr_services[1]}" alt="QR Code" onerror="this.parentElement.style.display='none'; document.getElementById('qr-final').style.display='block';"></div>
-            <div id="qr-final" style="display:none;"><p>Chyba pri načítaní QR kódu.</p><a href="{evaluator_url}" target="_blank">Otvoriť hodnotenie manuálne</a></div>
+        error_html = """
+        <html><head><style>
+            body { margin: 0; display: flex; justify-content: center; align-items: center; height: 100vh; font-family: sans-serif; background-color: #f0f2f6; }
+            .message-box { padding: 2rem; background: white; border-radius: 1rem; box-shadow: 0 4px 12px rgba(0,0,0,0.1); text-align: center; }
+            h2 { color: #ef4444; }
+        </style></head><body>
+            <div class="message-box">
+                <h2>Hodnotenie nie je aktívne</h2>
+                <p>Prosím, kontaktujte administrátora pre spustenie hodnotenia.</p>
+            </div>
         </body></html>
         """
-        with st.container():
-            st.markdown('<div class="qr-card">', unsafe_allow_html=True)
-            components.html(qr_html, height=410, width=410)
-            st.markdown('</div>', unsafe_allow_html=True)
-    
-    st.markdown('</div>', unsafe_allow_html=True)
+        components.html(error_html, height=600)
+        return
 
-# --- Admin a Evaluator rozhrania ---
+    # Ak je session aktívna, vygeneruje sa stránka s QR kódom
+    app_url = "https://consumervote.streamlit.app"
+    evaluator_url = f"{app_url}/?mode=evaluator"
+    encoded_url = urllib.parse.quote(evaluator_url)
+    
+    qr_services = [
+        f"https://api.qrserver.com/v1/create-qr-code/?size=400x400&ecc=H&data={encoded_url}",
+        f"https://quickchart.io/qr?text={encoded_url}&size=400&ecLevel=H"
+    ]
+    
+    # Vytvorenie kompletného, sebestačného HTML pre zobrazenie
+    qr_page_html = f"""
+    <!DOCTYPE html>
+    <html>
+    <head>
+    <style>
+        body {{
+            margin: 0; padding: 0; display: flex; justify-content: center; align-items: center; height: 100vh;
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+            background-color: #f0f2f6;
+        }}
+        .container {{
+            text-align: center; background-color: white; padding: 2rem 3rem 3rem 3rem;
+            border-radius: 1.5rem; box-shadow: 0 10px 30px rgba(0, 0, 0, 0.1); max-width: 500px;
+        }}
+        h1 {{ font-size: 2.2rem; color: #111827; margin-bottom: 0.5rem; }}
+        p {{ font-size: 1.2rem; color: #4b5563; margin-top: 0; margin-bottom: 1.5rem; }}
+        .qr-wrapper {{ width: 400px; height: 400px; position: relative; }}
+        .qr-wrapper img {{ width: 100%; height: 100%; border-radius: 1rem; }}
+        .fallback {{ display: none; padding: 2rem; color: #ef4444; }}
+    </style>
+    </head>
+    <body>
+        <div class="container">
+            <h1>{current_state['session_name']}</h1>
+            <p>Naskenujte kód a začnite hodnotiť</p>
+            <div class="qr-wrapper">
+                <div id="qr-primary">
+                    <img src="{qr_services[0]}" alt="QR Code" 
+                         onerror="this.parentElement.style.display='none'; document.getElementById('qr-fallback').style.display='block';">
+                </div>
+                <div id="qr-fallback" style="display:none;">
+                    <img src="{qr_services[1]}" alt="QR Code Fallback"
+                         onerror="this.parentElement.style.display='none'; document.getElementById('qr-text-fallback').style.display='block';">
+                </div>
+                <div id="qr-text-fallback" class="fallback">
+                    <b>Chyba: QR kód sa nepodarilo načítať.</b><br><br>
+                    <a href="{evaluator_url}" target="_blank">Otvorte odkaz manuálne</a>
+                </div>
+            </div>
+        </div>
+    </body>
+    </html>
+    """
+    components.html(qr_page_html, height=800, scrolling=True)
+
 def admin_login():
-    """Login formulár pre admin"""
     st.markdown('<h1 class="main-title">Administrácia</h1>', unsafe_allow_html=True)
     with st.form("admin_login_form"):
         password = st.text_input("Heslo:", type="password")
@@ -275,17 +311,13 @@ def admin_login():
                 if session_token:
                     st.session_state.admin_session_token = session_token
                     st.session_state.admin_authenticated = True
-                    log_audit_action("AUTH_LOGIN", "Admin úspešne prihlásený")
+                    log_audit_action("AUTH_LOGIN", "Admin prihlásený")
                     st.rerun()
             else:
-                log_audit_action("AUTH_LOGIN_FAILED", "Neúspešný pokus o prihlásenie")
                 st.error("Nesprávne heslo!")
 
 def admin_dashboard():
-    """Admin dashboard rozhranie"""
     st.markdown(get_professional_css(), unsafe_allow_html=True)
-    
-    # --- FIX: Zjednodušená a spoľahlivá kontrola prihlásenia ---
     if not st.session_state.get('admin_authenticated', False):
         admin_login()
         return
@@ -306,18 +338,16 @@ def admin_dashboard():
     c1.markdown(f"<div class='professional-card'><h4>Status</h4><p class='{status_class}'>{'AKTÍVNA' if current_state['session_active'] else 'NEAKTÍVNA'}</p></div>", unsafe_allow_html=True)
     c2.markdown(f"<div class='professional-card'><h4>Vzorky</h4><p style='font-size: 1.5rem; font-weight: 600;'>{current_state['samples_count']}</p></div>", unsafe_allow_html=True)
     c3.markdown(f"<div class='professional-card'><h4>Hodnotenia</h4><p style='font-size: 1.5rem; font-weight: 600;'>{len(current_state['evaluations'])}</p></div>", unsafe_allow_html=True)
-    
     st.divider()
 
     if current_state['session_active']:
         col1, col2 = st.columns([2, 1])
         with col1:
-            st.markdown('<h2 class="section-title">QR kód pre priame hodnotenie</h2>', unsafe_allow_html=True)
+            st.markdown('<h2 class="section-title">QR kód pre hodnotenie</h2>', unsafe_allow_html=True)
             app_url = "https://consumervote.streamlit.app"
             evaluator_url = f"{app_url}/?mode=evaluator"
             encoded_url = urllib.parse.quote(evaluator_url)
-            qr_html = f"""
-            <html><head><style>body {{ margin: 0; }}</style></head><body>
+            qr_html = f"""<html><head><style>body {{ margin: 0; }}</style></head><body>
                 <div id="qr-0"><img src="https://api.qrserver.com/v1/create-qr-code/?size=300x300&data={encoded_url}" onerror="this.parentElement.style.display='none'; document.getElementById('qr-1').style.display='block';"></div>
                 <div id="qr-1" style="display:none;"><img src="https://quickchart.io/qr?text={encoded_url}&size=300" onerror="this.parentElement.style.display='none';"></div>
             </body></html>"""
@@ -328,12 +358,9 @@ def admin_dashboard():
 
         with col2:
             st.markdown('<h2 class="section-title">Rýchle akcie</h2>', unsafe_allow_html=True)
-            
-            # --- NOVÝ ODKAZ PRE ZOBRAZENIE QR KÓDU NA CELEJ OBRAZOVKE ---
             qr_page_url = f"{app_url}/?mode=qr"
-            st.link_button("Zobraziť QR na celej obrazovke", qr_page_url, use_container_width=True)
-            st.write("") # Pridanie medzery
-            
+            st.link_button("Zobraziť QR na celej obrazovke", qr_page_url, use_container_width=True, type="secondary")
+            st.write("")
             if st.button("Reset hodnotení", use_container_width=True):
                 if clear_evaluations_for_session(current_state['session_name']): st.success("Hodnotenia vymazané!")
                 st.rerun()
@@ -395,10 +422,8 @@ def evaluator_interface():
         evaluator_name = st.text_input("Vaše meno alebo prezývka:")
         options = [''] + current_state['samples_names']
         first = st.selectbox("1. miesto (najlepšia):", options, format_func=lambda x: "Vyberte..." if x == '' else x)
-        second_options = [o for o in options if o != first] if first else options
-        second = st.selectbox("2. miesto:", second_options, format_func=lambda x: "Vyberte..." if x == '' else x)
-        third_options = [o for o in second_options if o != second] if second else second_options
-        third = st.selectbox("3. miesto:", third_options, format_func=lambda x: "Vyberte..." if x == '' else x)
+        second = st.selectbox("2. miesto:", [o for o in options if o != first], format_func=lambda x: "Vyberte..." if x == '' else x)
+        third = st.selectbox("3. miesto:", [o for o in options if o not in [first, second]], format_func=lambda x: "Vyberte..." if x == '' else x)
         comment = st.text_area("Komentár (voliteľný):")
         
         if st.form_submit_button("Odoslať hodnotenie", type="primary", use_container_width=True):
@@ -418,18 +443,15 @@ def main():
     """Hlavná funkcia aplikácie"""
     init_database()
     
-    # --- FIX: Overenie session hneď na začiatku pre perzistenciu ---
+    # Overenie session pri každom načítaní pre perzistenciu
     if 'admin_session_token' in st.session_state and not st.session_state.get('admin_authenticated', False):
         if verify_admin_session(st.session_state.admin_session_token):
             st.session_state.admin_authenticated = True
         else:
-            # Token je neplatný/expirovaný, vyčistíme ho
-            del st.session_state.admin_session_token
-            st.session_state.admin_authenticated = False
+            del st.session_state['admin_session_token']
 
     mode = st.query_params.get('mode', '').lower()
 
-    # Smerovanie na základe URL parametra
     if mode == 'qr':
         qr_display_page()
         return
@@ -437,20 +459,17 @@ def main():
     if mode == 'evaluator':
         st.session_state.admin_mode = False
     
-    # Zobrazenie sidebaru (okrem qr stránky)
     with st.sidebar:
         st.title("Menu")
         st.session_state.admin_mode = (st.radio("Režim:", ["Admin Dashboard", "Hodnotiteľ"],
                                                  index=0 if st.session_state.get('admin_mode', True) else 1) == "Admin Dashboard")
 
-    # Zobrazenie hlavného obsahu
     if st.session_state.admin_mode:
         admin_dashboard()
     else:
         evaluator_interface()
 
 if __name__ == "__main__":
-    # Inicializácia session state premenných
     if 'session_id' not in st.session_state:
         from streamlit.runtime.scriptrunner import get_script_run_ctx
         st.session_state.session_id = get_script_run_ctx().session_id
