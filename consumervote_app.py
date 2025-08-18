@@ -11,7 +11,7 @@ import random
 # --- Základné nastavenia a inicializácia ---
 st.set_page_config(page_title="Hodnotenie vzoriek", page_icon="🧪", layout="wide")
 
-# --- Databázové funkcie (bez zmien) ---
+# --- Databázové funkcie ---
 def init_database():
     db_path = "consumervote.db"
     conn = sqlite3.connect(db_path)
@@ -53,7 +53,6 @@ def verify_admin_session(token):
     return False
 
 def authenticate_admin():
-    """Centrálna funkcia, ktorá overí session a nastaví stav prihlásenia."""
     token = st.session_state.get('admin_session_token')
     st.session_state.admin_authenticated = verify_admin_session(token)
 
@@ -160,13 +159,18 @@ def render_admin_dashboard():
         if not evaluations:
             st.info("Zatiaľ žiadne hodnotenia na zobrazenie.")
         else:
-            scores = {name: 0 for name in json.loads(state['samples_names'])}
+            # --- FIX: Pridaná kontrola, či kľúč existuje, aby sa predišlo KeyError ---
+            current_sample_names = json.loads(state['samples_names'])
+            scores = {name: 0 for name in current_sample_names}
+            
             for ev in evaluations:
                 data = json.loads(ev['evaluation_data'])
                 for name, rank in data.items():
-                    if rank == 1: scores[name] += 3
-                    elif rank == 2: scores[name] += 2
-                    elif rank == 3: scores[name] += 1
+                    if name in scores: # Táto kontrola zabráni pádu aplikácie
+                        if rank == 1: scores[name] += 3
+                        elif rank == 2: scores[name] += 2
+                        elif rank == 3: scores[name] += 1
+
             sorted_scores = sorted(scores.items(), key=lambda item: item[1], reverse=True)
             results_df = pd.DataFrame(sorted_scores, columns=['Vzorka', 'Body'])
             results_df.index += 1
@@ -190,7 +194,6 @@ def render_admin_dashboard():
             export_df = pd.DataFrame([{'hodnotiteľ': e['evaluator_name'], 'komentár': e['comment'], 'čas': e['created_at'], **json.loads(e['evaluation_data'])} for e in evaluations])
             st.download_button("Stiahnuť CSV", export_df.to_csv(index=False).encode('utf-8'), f"export_{state['session_name']}.csv", "text/csv", use_container_width=True)
     
-    # Tlačidlo na odhlásenie v sidebare pre lepší prístup
     with st.sidebar:
         st.title("Admin Menu")
         if st.button("Odhlásiť sa", use_container_width=True):
@@ -200,7 +203,6 @@ def render_admin_dashboard():
             st.session_state.admin_authenticated = False
             if 'admin_session_token' in st.session_state: del st.session_state['admin_session_token']
             st.rerun()
-
 
 def render_evaluator_interface():
     state, _ = get_state()
@@ -253,6 +255,20 @@ def render_evaluator_interface():
                 st.session_state.evaluation_submitted = True
                 st.rerun()
 
+def qr_display_page():
+    # Táto funkcia je v poriadku
+    st.markdown("<style>.stSidebar, .stHeader, footer { display: none !important; } .main .block-container { max-width: 100% !important; padding: 0 !important; margin: 0 !important; }</style>", unsafe_allow_html=True)
+    state, _ = get_state()
+    if not state['session_active']:
+        error_html = "<html><head><style>body { margin: 0; display: flex; justify-content: center; align-items: center; height: 100vh; font-family: sans-serif; background-color: #f0f2f6; } .msg { padding: 2rem; background: white; border-radius: 1rem; box-shadow: 0 4px 12px rgba(0,0,0,0.1); text-align: center; } h2 { color: #ef4444; }</style></head><body><div class='msg'><h2>Hodnotenie nie je aktívne</h2></div></body></html>"
+        components.html(error_html, height=600)
+        return
+    app_url = "https://consumervote.streamlit.app"
+    evaluator_url = f"{app_url}/?mode=evaluator"
+    encoded_url = urllib.parse.quote(evaluator_url)
+    qr_page_html = f"""<!DOCTYPE html><html><head><style>body {{margin: 0; padding: 0; display: flex; justify-content: center; align-items: center; height: 100vh; font-family: sans-serif; background-color: #f0f2f6;}} .container {{text-align: center; background-color: white; padding: 2rem 3rem 3rem 3rem; border-radius: 1.5rem; box-shadow: 0 10px 30px rgba(0,0,0,0.1);}} h1 {{font-size: 2.2rem; color: #111827;}} p {{font-size: 1.2rem; color: #4b5563;}}</style></head><body><div class="container"><h1>{state['session_name']}</h1><p>Naskenujte kód a začnite hodnotiť</p><img src="https://api.qrserver.com/v1/create-qr-code/?size=400x400&ecc=H&data={encoded_url}" alt="QR Code"></div></body></html>"""
+    components.html(qr_page_html, height=800, scrolling=True)
+
 # --- Hlavná funkcia a smerovač (Router) ---
 def main():
     """Hlavná funkcia, ktorá riadi, čo sa používateľovi zobrazí."""
@@ -262,12 +278,10 @@ def main():
     
     mode = st.query_params.get('mode', '').lower()
 
-    # Smerovač pre špeciálne stránky bez bočného menu
     if mode == 'evaluator':
         render_evaluator_interface()
     elif mode == 'qr':
         qr_display_page()
-    # Predvolené zobrazenie
     else:
         if st.session_state.get('admin_authenticated'):
             render_admin_dashboard()
