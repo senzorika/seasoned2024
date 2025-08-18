@@ -29,11 +29,10 @@ def init_database():
     cursor.execute('CREATE TABLE IF NOT EXISTS audit_log (id INTEGER PRIMARY KEY AUTOINCREMENT, timestamp TIMESTAMP, admin_session_id TEXT, admin_ip TEXT, action_type TEXT, action_description TEXT, session_name TEXT, old_values TEXT, new_values TEXT, affected_records INTEGER, success BOOLEAN, error_message TEXT)')
     cursor.execute('CREATE TABLE IF NOT EXISTS admin_sessions (id INTEGER PRIMARY KEY AUTOINCREMENT, session_token TEXT UNIQUE NOT NULL, ip_address TEXT, user_agent TEXT, created_at TIMESTAMP, last_activity TIMESTAMP, expires_at TIMESTAMP)')
     
-    # FIX: Pridanie stĺpca pre výhercu, ak neexistuje
     try:
         cursor.execute('ALTER TABLE evaluation_settings ADD COLUMN session_winner TEXT')
     except sqlite3.OperationalError:
-        pass # Stĺpec už existuje
+        pass
 
     cursor.execute('SELECT COUNT(*) FROM evaluation_settings')
     if cursor.fetchone()[0] == 0:
@@ -96,7 +95,6 @@ def get_current_state():
     conn = sqlite3.connect("consumervote.db")
     cursor = conn.cursor()
     try:
-        # Získanie aj mena výhercu
         cursor.execute('SELECT session_name, session_active, samples_count, samples_names, session_winner FROM evaluation_settings ORDER BY id DESC LIMIT 1')
         settings = cursor.fetchone()
         if settings:
@@ -113,7 +111,6 @@ def save_evaluation_settings(session_name, samples_count, samples_names, session
     conn = sqlite3.connect("consumervote.db")
     cursor = conn.cursor()
     try:
-        # Pri spustení novej session resetujeme výhercu
         cursor.execute('UPDATE evaluation_settings SET session_name = ?, samples_count = ?, samples_names = ?, session_active = ?, updated_at = CURRENT_TIMESTAMP, session_winner = NULL WHERE id = 1',
                        (session_name, samples_count, json.dumps(samples_names), int(session_active)))
         conn.commit()
@@ -166,7 +163,6 @@ def clear_evaluations_for_session(session_name):
     try:
         cursor.execute('DELETE FROM evaluations WHERE session_name = ?', (session_name,))
         cursor.execute('DELETE FROM device_tracking WHERE session_name = ?', (session_name,))
-        # Zmažeme aj výhercu pri resete
         cursor.execute('UPDATE evaluation_settings SET session_winner = NULL WHERE session_name = ?', (session_name,))
         conn.commit()
         return True
@@ -174,7 +170,6 @@ def clear_evaluations_for_session(session_name):
         conn.close()
 
 def save_winner(session_name, winner_name):
-    """Uloží meno výhercu do databázy."""
     conn = sqlite3.connect("consumervote.db")
     cursor = conn.cursor()
     try:
@@ -204,10 +199,11 @@ def qr_display_page():
     components.html(qr_page_html, height=800, scrolling=True)
 
 def results_page():
-    """Stránka na zobrazenie výsledkov a losovanie výhercu."""
     st.markdown(get_professional_css(), unsafe_allow_html=True)
     if not st.session_state.get('admin_authenticated', False):
         st.error("Prístup zamietnutý. Prosím, prihláste sa ako administrátor.")
+        if st.button("Späť na prihlásenie"):
+            st.query_params.clear()
         return
 
     current_state = get_current_state()
@@ -217,13 +213,11 @@ def results_page():
         st.warning("Pre toto hodnotenie neboli nájdené žiadne záznamy.")
         return
 
-    # 1. Výpočet a zobrazenie bodov
     st.markdown('<h2 class="section-title">🏆 Konečné poradie podľa bodov</h2>', unsafe_allow_html=True)
     scores = {name: 0 for name in current_state['samples_names']}
     for evaluation in current_state['evaluations']:
         for sample_name in current_state['samples_names']:
-            rank_key = f'poradie_{sample_name}'
-            rank = evaluation.get(rank_key)
+            rank = evaluation.get(f'poradie_{sample_name}')
             if rank == 1: scores[sample_name] += 3
             elif rank == 2: scores[sample_name] += 2
             elif rank == 3: scores[sample_name] += 1
@@ -233,14 +227,12 @@ def results_page():
     results_df.index = results_df.index + 1
     st.dataframe(results_df, use_container_width=True)
 
-    # 2. Losovanie výhercu
     st.divider()
     st.markdown('<h2 class="section-title">🎉 Losovanie výhercu z hodnotiteľov</h2>', unsafe_allow_html=True)
     
-    # Ak už bol výherca vylosovaný a uložený
     if current_state.get('winner'):
         st.success(f"**Vylosovaný výherca je: {current_state['winner']}**")
-        st.info("Toto losovanie je jednorazové. Výherca bol uložený.")
+        st.info("Toto losovanie je jednorazové a výherca bol natrvalo uložený.")
     else:
         if st.button("🎲 Vylosovať výhercu", type="primary", use_container_width=True):
             evaluators = list(set(e['hodnotiteľ'] for e in current_state['evaluations']))
@@ -253,11 +245,9 @@ def results_page():
             else:
                 st.error("Nepodarilo sa nájsť žiadnych hodnotiteľov na losovanie.")
     
-    # Zobrazenie výhercu hneď po kliknutí (pred rerunom)
     if 'drawn_winner' in st.session_state:
         st.success(f"**Vylosovaný výherca je: {st.session_state.drawn_winner}**")
         del st.session_state.drawn_winner
-
 
 def admin_login():
     st.markdown('<h1 class="main-title">Administrácia</h1>', unsafe_allow_html=True)
@@ -285,9 +275,10 @@ def admin_dashboard():
     with col1: st.markdown('<h1 class="main-title">Dashboard</h1>', unsafe_allow_html=True)
     with col2:
         if st.button("Odhlásiť"):
-            destroy_admin_session(st.session_state.admin_session_token)
+            destroy_admin_session(st.session_state.get('admin_session_token'))
             st.session_state.admin_authenticated = False
-            st.session_state.admin_session_token = None
+            if 'admin_session_token' in st.session_state:
+                del st.session_state['admin_session_token']
             st.rerun()
     
     c1, c2, c3 = st.columns(3)
@@ -322,7 +313,6 @@ def admin_dashboard():
                 st.rerun()
     else:
         st.warning("Hodnotenie je neaktívne.")
-        # Zobrazenie odkazu na výsledky, ak nie sú žiadne hodnotenia
         if current_state['evaluations']:
              st.link_button("🏆 Zobraziť konečné výsledky a losovanie", "/?mode=results", use_container_width=True)
 
@@ -383,28 +373,35 @@ def evaluator_interface():
 def main():
     """Hlavná funkcia aplikácie"""
     init_database()
-    if 'admin_session_token' in st.session_state and not st.session_state.get('admin_authenticated', False):
-        if verify_admin_session(st.session_state.admin_session_token):
-            st.session_state.admin_authenticated = True
-        else:
-            del st.session_state['admin_session_token']
+    
+    # --- FIX: Robustné overovanie session pri každom behu ---
+    token = st.session_state.get('admin_session_token')
+    if token and verify_admin_session(token):
+        st.session_state.admin_authenticated = True
+    else:
+        st.session_state.admin_authenticated = False
 
     mode = st.query_params.get('mode', '').lower()
 
+    # Smerovanie na špeciálne stránky
     if mode == 'qr':
         qr_display_page()
         return
     if mode == 'results':
         results_page()
         return
+    
+    # Nastavenie režimu admin/hodnotiteľ
     if mode == 'evaluator':
         st.session_state.admin_mode = False
     
+    # Zobrazenie sidebaru (okrem qr a results stránok)
     with st.sidebar:
         st.title("Menu")
         st.session_state.admin_mode = (st.radio("Režim:", ["Admin Dashboard", "Hodnotiteľ"],
                                                  index=0 if st.session_state.get('admin_mode', True) else 1) == "Admin Dashboard")
 
+    # Zobrazenie hlavného obsahu
     if st.session_state.admin_mode:
         admin_dashboard()
     else:
@@ -415,6 +412,5 @@ if __name__ == "__main__":
         from streamlit.runtime.scriptrunner import get_script_run_ctx
         st.session_state.session_id = get_script_run_ctx().session_id
     if 'admin_mode' not in st.session_state: st.session_state.admin_mode = True
-    if 'admin_authenticated' not in st.session_state: st.session_state.admin_authenticated = False
     
     main()
