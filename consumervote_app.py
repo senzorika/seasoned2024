@@ -17,7 +17,7 @@ st.set_page_config(
     layout="wide"
 )
 
-# --- Databázové funkcie (bez zmien) ---
+# --- Databázové funkcie ---
 def init_database():
     db_path = "consumervote.db"
     conn = sqlite3.connect(db_path)
@@ -178,7 +178,9 @@ def get_professional_css():
 ADMIN_PASSWORD_MD5 = hashlib.md5("consumervote24".encode()).hexdigest()
 def verify_password(password): return hashlib.md5(password.encode()).hexdigest() == ADMIN_PASSWORD_MD5
 
+# --- FIX: Centrálna funkcia pre overenie prihlásenia ---
 def authenticate_admin():
+    """Overí session token a nastaví stav prihlásenia. Toto je jediný zdroj pravdy."""
     token = st.session_state.get('admin_session_token')
     if token and verify_admin_session(token):
         st.session_state.admin_authenticated = True
@@ -202,19 +204,13 @@ def qr_display_page():
     components.html(qr_page_html, height=800, scrolling=True)
 
 def results_page():
+    # Overenie prihlásenia je teraz v `main()` funkcii.
     st.markdown(get_professional_css(), unsafe_allow_html=True)
-    if not st.session_state.get('admin_authenticated', False):
-        st.error("Prístup zamietnutý. Prosím, prihláste sa ako administrátor.")
-        st.warning("Pre návrat na hlavnú stránku obnovte (refresh) stránku alebo použite menu vľavo.")
-        return
-
     current_state = get_current_state()
     st.markdown(f'<h1 class="main-title">Výsledky: {current_state["session_name"]}</h1>', unsafe_allow_html=True)
-
     if not current_state['evaluations']:
         st.warning("Pre toto hodnotenie neboli nájdené žiadne záznamy.")
         return
-
     st.markdown('<h2 class="section-title">🏆 Konečné poradie podľa bodov</h2>', unsafe_allow_html=True)
     scores = {name: 0 for name in current_state['samples_names']}
     for evaluation in current_state['evaluations']:
@@ -223,15 +219,12 @@ def results_page():
             if rank == 1: scores[sample_name] += 3
             elif rank == 2: scores[sample_name] += 2
             elif rank == 3: scores[sample_name] += 1
-    
     sorted_scores = sorted(scores.items(), key=lambda item: item[1], reverse=True)
     results_df = pd.DataFrame(sorted_scores, columns=['Vzorka', 'Počet bodov'])
     results_df.index = results_df.index + 1
     st.dataframe(results_df, use_container_width=True)
-
     st.divider()
     st.markdown('<h2 class="section-title">🎉 Losovanie výhercu z hodnotiteľov</h2>', unsafe_allow_html=True)
-    
     if current_state.get('winner'):
         st.success(f"**Vylosovaný výherca je: {current_state['winner']}**")
         st.info("Toto losovanie je jednorazové a výherca bol natrvalo uložený.")
@@ -246,7 +239,6 @@ def results_page():
                 st.rerun()
             else:
                 st.error("Nepodarilo sa nájsť žiadnych hodnotiteľov na losovanie.")
-    
     if 'drawn_winner' in st.session_state:
         st.success(f"**Vylosovaný výherca je: {st.session_state.drawn_winner}**")
         del st.session_state.drawn_winner
@@ -266,13 +258,9 @@ def admin_login():
                 st.error("Nesprávne heslo!")
 
 def admin_dashboard():
+    # Overenie prihlásenia je teraz v `main()` funkcii.
     st.markdown(get_professional_css(), unsafe_allow_html=True)
-    if not st.session_state.get('admin_authenticated', False):
-        admin_login()
-        return
-
     current_state = get_current_state()
-    
     col1, col2 = st.columns([4, 1])
     with col1: st.markdown('<h1 class="main-title">Dashboard</h1>', unsafe_allow_html=True)
     with col2:
@@ -282,14 +270,12 @@ def admin_dashboard():
             if 'admin_session_token' in st.session_state:
                 del st.session_state['admin_session_token']
             st.rerun()
-    
     c1, c2, c3 = st.columns(3)
     status_class = "status-active" if current_state['session_active'] else "status-inactive"
     c1.markdown(f"<div class='professional-card'><h4>Status</h4><p class='{status_class}'>{'AKTÍVNA' if current_state['session_active'] else 'NEAKTÍVNA'}</p></div>", unsafe_allow_html=True)
     c2.markdown(f"<div class='professional-card'><h4>Vzorky</h4><p style='font-size: 1.5rem; font-weight: 600;'>{current_state['samples_count']}</p></div>", unsafe_allow_html=True)
     c3.markdown(f"<div class='professional-card'><h4>Hodnotenia</h4><p style='font-size: 1.5rem; font-weight: 600;'>{len(current_state['evaluations'])}</p></div>", unsafe_allow_html=True)
     st.divider()
-
     if current_state['session_active']:
         col1, col2 = st.columns([2, 1])
         with col1:
@@ -302,7 +288,6 @@ def admin_dashboard():
                 st.markdown('<div class="professional-card">', unsafe_allow_html=True)
                 components.html(qr_html, height=310)
                 st.markdown('</div>', unsafe_allow_html=True)
-
         with col2:
             st.markdown('<h2 class="section-title">Rýchle akcie</h2>', unsafe_allow_html=True)
             st.link_button("Zobraziť QR na celej obrazovke", f"{app_url}/?mode=qr", use_container_width=True, type="secondary")
@@ -317,7 +302,6 @@ def admin_dashboard():
         st.warning("Hodnotenie je neaktívne.")
         if current_state['evaluations']:
              st.link_button("🏆 Zobraziť konečné výsledky a losovanie", "/?mode=results", use_container_width=True)
-
     with st.expander("Nastavenia hodnotenia", expanded=not current_state['session_active']):
         admin_settings_section(current_state)
 
@@ -334,49 +318,31 @@ def admin_settings_section(current_state):
             if save_evaluation_settings(session_name, samples_count, sample_names, False): st.success("Nastavenia uložené!")
             st.rerun()
 
-# --- FIX: Pridaný QR kód pre zdieľanie na stránke s odpočítavaním ---
 def evaluator_interface():
     st.markdown(get_professional_css(), unsafe_allow_html=True)
     if 'mode' in st.query_params and st.query_params['mode'] == 'evaluator':
         st.markdown("<style>.stSidebar { display: none !important; }</style>", unsafe_allow_html=True)
-    
     current_state = get_current_state()
     st.markdown(f'<h1 class="main-title">{current_state["session_name"]}</h1>', unsafe_allow_html=True)
-    
     if not current_state['session_active']:
         st.error("Hodnotenie momentálne nie je aktívne.")
         return
-
     fingerprint, ip, ua = get_device_fingerprint()
     can_eval, msg = check_device_limit(fingerprint, current_state['session_name'])
-    
     if not can_eval:
         st.warning(msg)
         st.divider()
         st.info("Kým čakáte, môžete pozvať ostatných, aby sa zapojili!")
-        
         app_url = "https://consumervote.streamlit.app"
         evaluator_url = f"{app_url}/?mode=evaluator"
         encoded_url = urllib.parse.quote(evaluator_url)
-        
-        qr_html = f"""
-        <html><head><style>
-            body {{ margin: 0; display: flex; flex-direction: column; align-items: center; text-align: center; font-family: sans-serif; }}
-            p {{ margin-bottom: 10px; color: #333; font-weight: 500;}}
-            img {{ max-width: 200px; height: auto; border-radius: 8px; }}
-        </style></head><body>
-            <p>Šírte hodnotenie ďalej</p>
-            <img src="https://api.qrserver.com/v1/create-qr-code/?size=200x200&data={encoded_url}" alt="QR kód na zdieľanie">
-        </body></html>
-        """
+        qr_html = f'<html><head><style>body{{margin:0;display:flex;flex-direction:column;align-items:center;text-align:center;font-family:sans-serif}}p{{margin-bottom:10px;color:#333;font-weight:500}}img{{max-width:200px;height:auto;border-radius:8px}}</style></head><body><p>Šírte hodnotenie ďalej</p><img src="https://api.qrserver.com/v1/create-qr-code/?size=200x200&data={encoded_url}" alt="QR kód na zdieľanie"></body></html>'
         components.html(qr_html, height=250)
         return
-
     if st.session_state.get('evaluation_submitted', False):
         st.success("Ďakujeme za hodnotenie!")
         if st.button("Nové hodnotenie", type="primary"): st.session_state.evaluation_submitted = False; st.rerun()
         return
-
     with st.form("evaluation_form"):
         evaluator_name = st.text_input("Vaše meno alebo prezývka:")
         options = [''] + current_state['samples_names']
@@ -398,36 +364,41 @@ def evaluator_interface():
                 st.rerun()
 
 def main():
-    """Hlavná funkcia aplikácie"""
+    """Hlavná funkcia a smerovač (router) aplikácie."""
     init_database()
     authenticate_admin()
-
+    
     mode = st.query_params.get('mode', '').lower()
-
+    
+    # --- Centrálny smerovač ---
     if mode == 'qr':
         qr_display_page()
-        return
-    if mode == 'results':
-        results_page()
-        return
-    
-    if mode == 'evaluator':
-        st.session_state.admin_mode = False
-    
-    with st.sidebar:
-        st.title("Menu")
-        st.session_state.admin_mode = (st.radio("Režim:", ["Admin Dashboard", "Hodnotiteľ"],
-                                                 index=0 if st.session_state.get('admin_mode', True) else 1) == "Admin Dashboard")
-
-    if st.session_state.admin_mode:
-        admin_dashboard()
-    else:
+    elif mode == 'results':
+        if st.session_state.admin_authenticated:
+            results_page()
+        else:
+            st.error("Prístup zamietnutý. Pre zobrazenie výsledkov sa musíte prihlásiť ako administrátor.")
+    elif mode == 'evaluator':
         evaluator_interface()
+    else:
+        # Predvolená stránka s menu
+        with st.sidebar:
+            st.title("Menu")
+            # Ak je admin prihlásený, začne v dashboarde, inak v režime hodnotiteľa
+            default_index = 0 if st.session_state.admin_authenticated else 1
+            selected_mode = st.radio("Režim:", ["Admin Dashboard", "Hodnotiteľ"], index=default_index)
+        
+        if selected_mode == "Admin Dashboard":
+            if st.session_state.admin_authenticated:
+                admin_dashboard()
+            else:
+                admin_login()
+        else:
+            evaluator_interface()
 
 if __name__ == "__main__":
     if 'session_id' not in st.session_state:
         from streamlit.runtime.scriptrunner import get_script_run_ctx
         st.session_state.session_id = get_script_run_ctx().session_id
-    if 'admin_mode' not in st.session_state: st.session_state.admin_mode = True
     
     main()
