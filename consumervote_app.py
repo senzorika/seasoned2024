@@ -17,27 +17,22 @@ st.set_page_config(
     layout="wide"
 )
 
-# --- Databázové funkcie ---
+# --- Databázové funkcie (bez zmien) ---
 def init_database():
-    """Inicializuje SQLite databázu a pridá stĺpec pre výhercu, ak neexistuje."""
     db_path = "consumervote.db"
     conn = sqlite3.connect(db_path)
     cursor = conn.cursor()
-    cursor.execute('CREATE TABLE IF NOT EXISTS evaluation_settings (id INTEGER PRIMARY KEY, session_name TEXT, session_active BOOLEAN, samples_count INTEGER, samples_names TEXT, created_at TIMESTAMP, updated_at TIMESTAMP)')
+    cursor.execute('CREATE TABLE IF NOT EXISTS evaluation_settings (id INTEGER PRIMARY KEY, session_name TEXT, session_active BOOLEAN, samples_count INTEGER, samples_names TEXT, created_at TIMESTAMP, updated_at TIMESTAMP, session_winner TEXT)')
     cursor.execute('CREATE TABLE IF NOT EXISTS evaluations (id INTEGER PRIMARY KEY AUTOINCREMENT, session_name TEXT, evaluator_name TEXT NOT NULL, evaluation_data TEXT NOT NULL, comment TEXT, created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP)')
     cursor.execute('CREATE TABLE IF NOT EXISTS device_tracking (id INTEGER PRIMARY KEY AUTOINCREMENT, device_fingerprint TEXT NOT NULL, ip_address TEXT, user_agent TEXT, session_name TEXT, last_evaluation TIMESTAMP, evaluation_count INTEGER, UNIQUE(device_fingerprint, session_name))')
-    cursor.execute('CREATE TABLE IF NOT EXISTS audit_log (id INTEGER PRIMARY KEY AUTOINCREMENT, timestamp TIMESTAMP, admin_session_id TEXT, admin_ip TEXT, action_type TEXT, action_description TEXT, session_name TEXT, old_values TEXT, new_values TEXT, affected_records INTEGER, success BOOLEAN, error_message TEXT)')
     cursor.execute('CREATE TABLE IF NOT EXISTS admin_sessions (id INTEGER PRIMARY KEY AUTOINCREMENT, session_token TEXT UNIQUE NOT NULL, ip_address TEXT, user_agent TEXT, created_at TIMESTAMP, last_activity TIMESTAMP, expires_at TIMESTAMP)')
-    
+    cursor.execute('SELECT COUNT(*) FROM evaluation_settings')
+    if cursor.fetchone()[0] == 0:
+        cursor.execute("INSERT INTO evaluation_settings (id, session_name, session_active, samples_count, samples_names) VALUES (1, 'Hodnotenie vzoriek', 0, 0, '[]')")
     try:
         cursor.execute('ALTER TABLE evaluation_settings ADD COLUMN session_winner TEXT')
     except sqlite3.OperationalError:
         pass
-
-    cursor.execute('SELECT COUNT(*) FROM evaluation_settings')
-    if cursor.fetchone()[0] == 0:
-        cursor.execute("INSERT INTO evaluation_settings (id, session_name, session_active, samples_count, samples_names) VALUES (1, 'Hodnotenie vzoriek', 0, 0, '[]')")
-    
     conn.commit()
     conn.close()
 
@@ -178,14 +173,28 @@ def save_winner(session_name, winner_name):
     finally:
         conn.close()
 
-# --- CSS a pomocné funkcie ---
 def get_professional_css():
     return """<style>@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap'); .stApp { font-family: 'Inter', sans-serif; } .stButton > button { font-family: 'Inter', sans-serif !important; min-height: 48px !important; font-size: 16px !important; font-weight: 500 !important; border-radius: 8px !important; border: 1px solid #e1e5e9 !important; transition: all 0.2s ease-in-out !important; background: #ffffff !important; color: #374151 !important; box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1) !important; } .stButton > button:hover { transform: translateY(-1px) !important; box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15) !important; } .stButton > button[kind="primary"] { background: linear-gradient(135deg, #3b82f6, #1d4ed8) !important; color: white !important; border: none !important; } .professional-card { background: white; border: 1px solid #e5e7eb; border-radius: 12px; padding: 1.5rem; margin: 1rem 0; box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1); } .main-title { font-size: 1.875rem; font-weight: 700; text-align: center; margin-bottom: 1.5rem; } .section-title { font-size: 1.25rem; font-weight: 600; margin: 1.5rem 0 1rem 0; } .status-active { color: #10b981; font-weight: 600; } .status-inactive { color: #ef4444; font-weight: 600; }</style>"""
 ADMIN_PASSWORD_MD5 = hashlib.md5("consumervote24".encode()).hexdigest()
 def verify_password(password): return hashlib.md5(password.encode()).hexdigest() == ADMIN_PASSWORD_MD5
 
+# --- FIX: Centrálna funkcia pre overenie prihlásenia ---
+def authenticate_admin():
+    """
+    Overí session token pri každom behu skriptu.
+    Toto je jediný zdroj pravdy o prihlásení.
+    """
+    token = st.session_state.get('admin_session_token')
+    if token and verify_admin_session(token):
+        st.session_state.admin_authenticated = True
+    else:
+        st.session_state.admin_authenticated = False
+        if 'admin_session_token' in st.session_state:
+            del st.session_state['admin_session_token']
+
 # --- Rôzne stránky aplikácie ---
 def qr_display_page():
+    # Táto funkcia je už v poriadku
     st.markdown("<style>.stSidebar, .stHeader, footer { display: none !important; } .main .block-container { max-width: 100% !important; padding: 0 !important; margin: 0 !important; }</style>", unsafe_allow_html=True)
     current_state = get_current_state()
     if not current_state['session_active']:
@@ -200,10 +209,10 @@ def qr_display_page():
 
 def results_page():
     st.markdown(get_professional_css(), unsafe_allow_html=True)
+    # --- FIX: Použitie centrálneho overenia ---
     if not st.session_state.get('admin_authenticated', False):
         st.error("Prístup zamietnutý. Prosím, prihláste sa ako administrátor.")
-        if st.button("Späť na prihlásenie"):
-            st.query_params.clear()
+        st.warning("Pre návrat na hlavnú stránku obnovte (refresh) stránku alebo použite menu vľavo.")
         return
 
     current_state = get_current_state()
@@ -265,6 +274,7 @@ def admin_login():
 
 def admin_dashboard():
     st.markdown(get_professional_css(), unsafe_allow_html=True)
+    # --- FIX: Použitie centrálneho overenia ---
     if not st.session_state.get('admin_authenticated', False):
         admin_login()
         return
@@ -374,12 +384,8 @@ def main():
     """Hlavná funkcia aplikácie"""
     init_database()
     
-    # --- FIX: Robustné overovanie session pri každom behu ---
-    token = st.session_state.get('admin_session_token')
-    if token and verify_admin_session(token):
-        st.session_state.admin_authenticated = True
-    else:
-        st.session_state.admin_authenticated = False
+    # Centrálne overenie session pri každom behu
+    authenticate_admin()
 
     mode = st.query_params.get('mode', '').lower()
 
@@ -395,13 +401,11 @@ def main():
     if mode == 'evaluator':
         st.session_state.admin_mode = False
     
-    # Zobrazenie sidebaru (okrem qr a results stránok)
     with st.sidebar:
         st.title("Menu")
         st.session_state.admin_mode = (st.radio("Režim:", ["Admin Dashboard", "Hodnotiteľ"],
                                                  index=0 if st.session_state.get('admin_mode', True) else 1) == "Admin Dashboard")
 
-    # Zobrazenie hlavného obsahu
     if st.session_state.admin_mode:
         admin_dashboard()
     else:
