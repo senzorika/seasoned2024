@@ -186,15 +186,17 @@ def render_admin_dashboard():
 
     with tab3:
         all_sessions = get_all_sessions()
-        # --- FIX: Kontrola, či existujú nejaké sessions, aby sa predišlo chybe ---
         if not all_sessions:
             st.info("Najprv vytvorte novú session v záložke 'Manažment Sessions'.")
         else:
             session_dict = {s['session_name']: s['id'] for s in all_sessions}
             selected_name = st.selectbox("Vyberte session pre zobrazenie výsledkov", options=session_dict.keys())
-            session, evaluations = get_session_by_id(session_dict.get(selected_name))
-            if session:
-                render_results_component(session, evaluations)
+            # --- FIX: Pridaná kontrola, či bol vybraný názov, aby sa predišlo chybe pri prázdnom zozname ---
+            if selected_name:
+                selected_id = session_dict[selected_name]
+                session, evaluations = get_session_by_id(selected_id)
+                if session:
+                    render_results_component(session, evaluations)
     
     with st.sidebar:
         st.title("Admin Menu")
@@ -260,7 +262,6 @@ def main():
     render_css()
     authenticate_admin()
     mode = st.query_params.get('mode', '').lower()
-
     if mode == 'evaluator':
         render_evaluator_interface()
     elif mode == 'qr':
