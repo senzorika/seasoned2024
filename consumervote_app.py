@@ -16,11 +16,12 @@ def init_database():
     with sqlite3.connect("consumervote.db") as conn:
         cursor = conn.cursor()
         cursor.execute('CREATE TABLE IF NOT EXISTS sessions (id INTEGER PRIMARY KEY AUTOINCREMENT, session_name TEXT NOT NULL, is_active BOOLEAN DEFAULT 0, samples_count INTEGER, samples_names TEXT, winner TEXT, created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP)')
-        cursor.execute('CREATE TABLE IF NOT EXISTS evaluations (id INTEGER PRIMARY KEY AUTOINCREMENT, session_id INTEGER, evaluator_name TEXT NOT NULL, evaluation_data TEXT NOT NULL, comment TEXT, created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP, FOREIGN KEY(session_id) REFERENCES sessions(id))')
+        cursor.execute('CREATE TABLE IF NOT EXISTS evaluations (id INTEGER PRIMARY KEY AUTOINCREMENT, session_id INTEGER, evaluator_name TEXT NOT NULL, evaluation_data TEXT NOT NULL, comment TEXT, created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP, FOREIGN KEY(session_id) REFERENCES sessions(id) ON DELETE CASCADE)')
         cursor.execute('CREATE TABLE IF NOT EXISTS device_tracking (id INTEGER PRIMARY KEY AUTOINCREMENT, device_fingerprint TEXT NOT NULL, session_id INTEGER, last_evaluation TIMESTAMP, UNIQUE(device_fingerprint, session_id))')
         cursor.execute('CREATE TABLE IF NOT EXISTS admin_sessions (id INTEGER PRIMARY KEY AUTOINCREMENT, session_token TEXT UNIQUE NOT NULL, ip_address TEXT, user_agent TEXT, created_at TIMESTAMP, expires_at TIMESTAMP)')
         if cursor.execute('SELECT COUNT(*) FROM sessions').fetchone()[0] == 0:
             cursor.execute("INSERT INTO sessions (session_name, is_active, samples_count, samples_names) VALUES ('Moje prvé hodnotenie', 0, 3, '[\"Vzorka 1\", \"Vzorka 2\", \"Vzorka 3\"]')")
+        conn.execute("PRAGMA foreign_keys = ON;")
 
 # --- Overovanie a správa session ---
 ADMIN_PASSWORD_MD5 = hashlib.md5("consumervote24".encode()).hexdigest()
@@ -59,6 +60,7 @@ def get_active_session():
         return dict(active_session), evaluations
 
 def get_session_by_id(session_id):
+    if session_id is None: return None, []
     with sqlite3.connect("consumervote.db") as conn:
         conn.row_factory = sqlite3.Row
         session = conn.execute('SELECT * FROM sessions WHERE id = ?', (session_id,)).fetchone()
@@ -93,21 +95,13 @@ def render_login_page():
                 else: st.error("Nesprávne heslo.")
 
 def render_results_component(session, evaluations):
-    """Zobrazí výsledky, losovanie a export pre danú session."""
     if not evaluations:
         st.info("Táto session zatiaľ nemá žiadne hodnotenia.")
         return
-
-    # --- FIX: Nová logika pre "ligovú tabuľku" s bodovaním 5-3-1 ---
     st.subheader(f"Ligová tabuľka pre '{session['session_name']}'")
-    
     POINTS = {1: 5, 2: 3, 3: 1}
     sample_names = json.loads(session['samples_names'])
-    
-    # Inicializácia štruktúry pre výsledky
     results_data = {name: {"points": 0, "1st": 0, "2nd": 0, "3rd": 0} for name in sample_names}
-
-    # Spracovanie každého hodnotenia
     for ev in evaluations:
         data = json.loads(ev['evaluation_data'])
         for name, rank in data.items():
@@ -117,42 +111,22 @@ def render_results_component(session, evaluations):
                     if rank == 1: results_data[name]["1st"] += 1
                     elif rank == 2: results_data[name]["2nd"] += 1
                     elif rank == 3: results_data[name]["3rd"] += 1
-
-    # Konverzia na DataFrame pre zobrazenie
-    table_data = []
-    for name, stats in results_data.items():
-        table_data.append({
-            "Vzorka": name,
-            "Body": stats["points"],
-            "1. miesta": stats["1st"],
-            "2. miesta": stats["2nd"],
-            "3. miesta": stats["3rd"],
-            "Celkovo v TOP3": stats["1st"] + stats["2nd"] + stats["3rd"]
-        })
-    
-    results_df = pd.DataFrame(table_data)
-    # Triedenie podľa bodov, potom podľa počtu 1. miest
-    results_df = results_df.sort_values(by=["Body", "1. miesta"], ascending=[False, False]).reset_index(drop=True)
-    results_df.index += 1
-    results_df.index.name = "Poz."
-    
+    table_data = [{"Vzorka": name, "Body": stats["points"], "1. miesta": stats["1st"], "2. miesta": stats["2nd"], "3. miesta": stats["3rd"], "TOP3": stats["1st"] + stats["2nd"] + stats["3rd"]} for name, stats in results_data.items()]
+    results_df = pd.DataFrame(table_data).sort_values(by=["Body", "1. miesta"], ascending=[False, False]).reset_index(drop=True)
+    results_df.index += 1; results_df.index.name = "Poz."
     st.dataframe(results_df, use_container_width=True)
     st.divider()
-
-    # Losovanie a export zostávajú rovnaké
     st.subheader("Losovanie výhercu")
     if session.get('winner'):
         st.success(f"**Vylosovaný výherca: {session['winner']}**")
     else:
-        if st.button("🎲 Vylosovať výhercu z tejto session", use_container_width=True, key=f"draw_{session['id']}"):
+        if st.button("🎲 Vylosovať výhercu", use_container_width=True, key=f"draw_{session['id']}"):
             evaluators = list(set(e['evaluator_name'] for e in evaluations))
             if evaluators:
                 winner = random.choice(evaluators)
                 save_winner(session['id'], winner)
-                st.balloons()
-                st.rerun()
+                st.balloons(); st.rerun()
     st.divider()
-    
     st.subheader("Export dát")
     export_df = pd.DataFrame([{'hodnotiteľ': e['evaluator_name'], 'komentár': e['comment'], 'čas': e['created_at'], **json.loads(e['evaluation_data'])} for e in evaluations])
     st.download_button("Stiahnuť CSV", export_df.to_csv(index=False).encode('utf-8'), f"export_{session['session_name']}.csv", "text/csv", use_container_width=True)
@@ -167,21 +141,15 @@ def render_admin_dashboard():
             st.warning("Žiadna session nie je aktívna. Prejdite do 'Manažment Sessions' a jednu aktivujte.")
         else:
             st.header(f"Aktívne hodnotenie: {active_session['session_name']}")
-            c1, c2 = st.columns(2)
-            c1.metric("Počet hodnotení", len(evaluations))
-            c2.metric("Počet vzoriek", active_session['samples_count'])
-            st.divider()
-            st.subheader("QR kód pre hodnotenie")
+            c1, c2 = st.columns(2); c1.metric("Počet hodnotení", len(evaluations)); c2.metric("Počet vzoriek", active_session['samples_count'])
+            st.divider(); st.subheader("QR kód pre hodnotenie")
             app_url = "https://consumervote.streamlit.app"
-            evaluator_url = f"{app_url}/?mode=evaluator"
-            encoded_url = urllib.parse.quote(evaluator_url)
-            qr_html = f'<html><body style="margin:0;display:flex;justify-content:center;"><img src="https://api.qrserver.com/v1/create-qr-code/?size=300x300&data={encoded_url}"></body></html>'
+            qr_html = f'<html><body style="margin:0;display:flex;justify-content:center;"><img src="https://api.qrserver.com/v1/create-qr-code/?size=300x300&data={urllib.parse.quote(f"{app_url}/?mode=evaluator")}"></body></html>'
             components.html(qr_html, height=310)
             st.link_button("Zobraziť QR na celej obrazovke", "/?mode=qr", use_container_width=True)
             st.divider()
             if st.button("Zastaviť túto session", use_container_width=True):
-                with sqlite3.connect("consumervote.db") as conn:
-                    conn.execute("UPDATE sessions SET is_active = 0 WHERE id = ?", (active_session['id'],))
+                with sqlite3.connect("consumervote.db") as conn: conn.execute("UPDATE sessions SET is_active = 0 WHERE id = ?", (active_session['id'],))
                 st.success("Session bola zastavená."); st.rerun()
 
     with tab2:
@@ -192,25 +160,18 @@ def render_admin_dashboard():
             sample_names = [st.text_input(f"Vzorka {i+1}", key=f"new_s_{i}") for i in range(samples_count)]
             if st.form_submit_button("Vytvoriť", type="primary"):
                 if session_name and all(sample_names):
-                    with sqlite3.connect("consumervote.db") as conn:
-                        conn.execute("INSERT INTO sessions (session_name, samples_count, samples_names) VALUES (?, ?, ?)", (session_name, samples_count, json.dumps(sample_names)))
+                    with sqlite3.connect("consumervote.db") as conn: conn.execute("INSERT INTO sessions (session_name, samples_count, samples_names) VALUES (?, ?, ?)", (session_name, samples_count, json.dumps(sample_names)))
                     st.success(f"Session '{session_name}' vytvorená."); st.rerun()
                 else: st.error("Vyplňte všetky polia.")
-
-        st.divider()
-        st.header("Zoznam všetkých sessions")
+        st.divider(); st.header("Zoznam všetkých sessions")
         for session in get_all_sessions():
             with st.container(border=True):
                 c1, c2, c3 = st.columns([3, 1, 1])
-                c1.subheader(session['session_name'])
-                c1.caption(f"Vytvorené: {datetime.fromisoformat(session['created_at']).strftime('%d.%m.%Y %H:%M')}")
-                if session['is_active']:
-                    c2.success("AKTÍVNA")
+                c1.subheader(session['session_name']); c1.caption(f"Vytvorené: {datetime.fromisoformat(session['created_at']).strftime('%d.%m.%Y %H:%M')}")
+                if session['is_active']: c2.success("AKTÍVNA")
                 else:
                     if c2.button("Aktivovať", key=f"act_{session['id']}", use_container_width=True):
-                        with sqlite3.connect("consumervote.db") as conn:
-                            conn.execute("UPDATE sessions SET is_active = 0")
-                            conn.execute("UPDATE sessions SET is_active = 1 WHERE id = ?", (session['id'],))
+                        with sqlite3.connect("consumervote.db") as conn: conn.execute("UPDATE sessions SET is_active = 0"); conn.execute("UPDATE sessions SET is_active = 1 WHERE id = ?", (session['id'],))
                         st.rerun()
                 if c3.button("Vymazať", key=f"del_{session['id']}", type="secondary", use_container_width=True):
                     st.session_state.session_to_delete = session['id']
@@ -218,22 +179,22 @@ def render_admin_dashboard():
                     st.warning(f"Naozaj chcete zmazať session '{session['session_name']}'?")
                     cc1, cc2 = st.columns(2)
                     if cc1.button("Áno, zmazať", key=f"conf_del_{session['id']}", type="primary"):
-                        with sqlite3.connect("consumervote.db") as conn:
-                            conn.execute("DELETE FROM evaluations WHERE session_id = ?", (session['id'],))
-                            conn.execute("DELETE FROM sessions WHERE id = ?", (session['id'],))
+                        with sqlite3.connect("consumervote.db") as conn: conn.execute("DELETE FROM sessions WHERE id = ?", (session['id'],))
                         del st.session_state.session_to_delete; st.rerun()
                     if cc2.button("Zrušiť", key=f"canc_del_{session['id']}"):
                         del st.session_state.session_to_delete; st.rerun()
 
     with tab3:
         all_sessions = get_all_sessions()
+        # --- FIX: Kontrola, či existujú nejaké sessions, aby sa predišlo chybe ---
         if not all_sessions:
-            st.info("Najprv vytvorte session v 'Manažment Sessions'.")
+            st.info("Najprv vytvorte novú session v záložke 'Manažment Sessions'.")
         else:
             session_dict = {s['session_name']: s['id'] for s in all_sessions}
             selected_name = st.selectbox("Vyberte session pre zobrazenie výsledkov", options=session_dict.keys())
-            session, evaluations = get_session_by_id(session_dict[selected_name])
-            render_results_component(session, evaluations)
+            session, evaluations = get_session_by_id(session_dict.get(selected_name))
+            if session:
+                render_results_component(session, evaluations)
     
     with st.sidebar:
         st.title("Admin Menu")
@@ -248,19 +209,15 @@ def render_admin_dashboard():
 def render_evaluator_interface():
     st.markdown("""<style>[data-testid="stHeader"], footer, [data-testid="stSidebar"] {display: none; visibility: hidden;}</style>""", unsafe_allow_html=True)
     active_session, _ = get_active_session()
-
     if not active_session:
-        st.error("Momentálne nie je aktívne žiadne hodnotenie.")
-        return
-
+        st.error("Momentálne nie je aktívne žiadne hodnotenie."); return
     st.markdown(f'<h1 class="main-title">{active_session["session_name"]}</h1>', unsafe_allow_html=True)
     fingerprint, ip, ua = get_client_info()
     with sqlite3.connect("consumervote.db") as conn:
         res = conn.execute('SELECT last_evaluation FROM device_tracking WHERE device_fingerprint = ? AND session_id = ?', (fingerprint, active_session['id'])).fetchone()
     if res and (datetime.now() - datetime.strptime(res[0], '%Y-%m-%d %H:%M:%S')).total_seconds() < 3600:
         rem_min = int(60 - (datetime.now() - datetime.strptime(res[0], '%Y-%m-%d %H:%M:%S')).total_seconds() / 60)
-        st.warning(f"Z tohto zariadenia už bolo hodnotené. Skúste znova o {rem_min} minút.")
-        return
+        st.warning(f"Z tohto zariadenia už bolo hodnotené. Skúste znova o {rem_min} minút."); return
     if st.session_state.get('evaluation_submitted'):
         st.success("Ďakujeme za hodnotenie!")
         if st.button("Odoslať ďalšie hodnotenie", use_container_width=True):
@@ -292,21 +249,16 @@ def qr_display_page():
     active_session, _ = get_active_session()
     if not active_session:
         error_html = "<html><head><style>body { margin: 0; display: flex; justify-content: center; align-items: center; height: 100vh; font-family: sans-serif; background-color: #f0f2f6; } .msg { padding: 2rem; background: white; border-radius: 1rem; box-shadow: 0 4px 12px rgba(0,0,0,0.1); text-align: center; } h2 { color: #ef4444; }</style></head><body><div class='msg'><h2>Hodnotenie nie je aktívne</h2></div></body></html>"
-        components.html(error_html, height=600)
-        return
+        components.html(error_html, height=600); return
     app_url = "https://consumervote.streamlit.app"
-    evaluator_url = f"{app_url}/?mode=evaluator"
-    encoded_url = urllib.parse.quote(evaluator_url)
-    qr_page_html = f"""<!DOCTYPE html><html><head><style>body {{margin: 0; padding: 0; display: flex; justify-content: center; align-items: center; height: 100vh; font-family: sans-serif; background-color: #f0f2f6;}} .container {{text-align: center; background-color: white; padding: 2rem 3rem 3rem 3rem; border-radius: 1.5rem; box-shadow: 0 10px 30px rgba(0,0,0,0.1);}} h1 {{font-size: 2.2rem; color: #111827;}} p {{font-size: 1.2rem; color: #4b5563;}}</style></head><body><div class="container"><h1>{active_session['session_name']}</h1><p>Naskenujte kód a začnite hodnotiť</p><img src="https://api.qrserver.com/v1/create-qr-code/?size=400x400&ecc=H&data={encoded_url}" alt="QR Code"></div></body></html>"""
+    qr_page_html = f"""<!DOCTYPE html><html><head><style>body {{margin: 0; padding: 0; display: flex; justify-content: center; align-items: center; height: 100vh; font-family: sans-serif; background-color: #f0f2f6;}} .container {{text-align: center; background-color: white; padding: 2rem 3rem 3rem 3rem; border-radius: 1.5rem; box-shadow: 0 10px 30px rgba(0,0,0,0.1);}} h1 {{font-size: 2.2rem; color: #111827;}} p {{font-size: 1.2rem; color: #4b5563;}}</style></head><body><div class="container"><h1>{active_session['session_name']}</h1><p>Naskenujte kód a začnite hodnotiť</p><img src="https://api.qrserver.com/v1/create-qr-code/?size=400x400&ecc=H&data={urllib.parse.quote(f'{app_url}/?mode=evaluator')}" alt="QR Code"></div></body></html>"""
     components.html(qr_page_html, height=800, scrolling=True)
 
-# --- Hlavná funkcia a smerovač (Router) ---
 def main():
-    """Hlavná funkcia, ktorá riadi, čo sa používateľovi zobrazí."""
+    """Hlavná funkcia a smerovač (router) aplikácie."""
     init_database()
     render_css()
     authenticate_admin()
-    
     mode = st.query_params.get('mode', '').lower()
 
     if mode == 'evaluator':
@@ -326,5 +278,4 @@ if __name__ == "__main__":
             st.session_state.session_id = get_script_run_ctx().session_id
         except Exception:
             st.session_state.session_id = str(random.randint(1, 1000000))
-    
     main()
