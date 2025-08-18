@@ -863,6 +863,15 @@ def simple_landing_page():
         border-radius: 16px;
         box-shadow: 0 4px 20px rgba(0, 0, 0, 0.1);
         border: 1px solid #e5e7eb;
+        margin-bottom: 2rem;
+    }
+    .debug-info {
+        background: #f0f0f0;
+        padding: 1rem;
+        border-radius: 8px;
+        margin: 1rem 0;
+        font-family: monospace;
+        font-size: 0.9rem;
     }
     @media (max-width: 768px) {
         .landing-title {
@@ -886,55 +895,79 @@ def simple_landing_page():
         """, unsafe_allow_html=True)
         return
     
-    # Hlavný obsah
-    st.markdown(f"""
-    <div class="landing-container">
-        <h1 class="landing-title">{current_state['session_name']}</h1>
-    </div>
-    """, unsafe_allow_html=True)
+    # Hlavný obsah s centrom
+    st.markdown(f'<h1 class="landing-title">{current_state["session_name"]}</h1>', unsafe_allow_html=True)
     
-    # QR kód
+    # QR kód - OPRAVENÁ URL pre mobile
     app_url = "https://consumervote.streamlit.app"
-    evaluator_url = f"{app_url}?mode=evaluator&hide_sidebar=true"
+    # Použijeme jednoduchšiu URL bez hide_sidebar pre lepšiu kompatibilitu
+    evaluator_url = f"{app_url}/?mode=evaluator"
     
-    # Skúsime viacero QR služieb
-    qr_urls = [
-        f"https://chart.googleapis.com/chart?chs=400x400&cht=qr&chl={urllib.parse.quote(evaluator_url)}&choe=UTF-8",
-        f"https://api.qrserver.com/v1/create-qr-code/?size=400x400&ecc=H&color=000000&bgcolor=ffffff&margin=2&data={urllib.parse.quote(evaluator_url)}"
-    ]
+    # Debug informácie
+    with st.expander("Debug informácie (pre testovanie)"):
+        st.write("**Generovaná URL:**")
+        st.code(evaluator_url)
+        st.write("**QR kód URL:**")
+        qr_debug_url = f"https://chart.googleapis.com/chart?chs=400x400&cht=qr&chl={urllib.parse.quote(evaluator_url)}&choe=UTF-8"
+        st.code(qr_debug_url)
     
-    # Centrovaný QR kód
+    # Centrovaný QR kód s fallback
     col1, col2, col3 = st.columns([1, 2, 1])
     with col2:
-        qr_loaded = False
+        # Skúsime najprv Google Charts (najspoľahlivejšie)
+        qr_url = f"https://chart.googleapis.com/chart?chs=400x400&cht=qr&chl={urllib.parse.quote(evaluator_url)}&choe=UTF-8"
         
-        for i, qr_url in enumerate(qr_urls):
-            try:
-                st.markdown('<div class="qr-container">', unsafe_allow_html=True)
-                st.image(qr_url, width=400)
-                st.markdown('</div>', unsafe_allow_html=True)
-                qr_loaded = True
-                break
-            except Exception as e:
-                if i == len(qr_urls) - 1:  # Posledný pokus
-                    st.error("Chyba pri načítaní QR kódu")
-                continue
-        
-        if not qr_loaded:
-            st.markdown(f"""
-            <div style="text-align: center; margin: 2rem 0;">
-                <a href="{evaluator_url}" target="_blank" style="
-                    display: inline-block;
-                    padding: 1rem 2rem;
-                    background-color: #3b82f6;
-                    color: white;
-                    text-decoration: none;
-                    border-radius: 8px;
-                    font-weight: 600;
-                    font-size: 1.125rem;
-                ">Prejsť na hodnotenie</a>
-            </div>
-            """, unsafe_allow_html=True)
+        try:
+            st.markdown('<div class="qr-container">', unsafe_allow_html=True)
+            st.image(qr_url, width=400, caption="Naskenujte pre hodnotenie")
+            st.markdown('</div>', unsafe_allow_html=True)
+        except Exception as e:
+            st.error(f"Chyba pri načítaní QR kódu: {e}")
+            
+            # Fallback - alternatívne QR služby
+            alternative_qr_urls = [
+                f"https://api.qrserver.com/v1/create-qr-code/?size=400x400&data={urllib.parse.quote(evaluator_url)}",
+                f"https://qr-code-generator24.com/api/qr?size=400&data={urllib.parse.quote(evaluator_url)}"
+            ]
+            
+            qr_loaded = False
+            for alt_url in alternative_qr_urls:
+                try:
+                    st.image(alt_url, width=400)
+                    qr_loaded = True
+                    break
+                except:
+                    continue
+            
+            if not qr_loaded:
+                # Ak sa nepodarí načítať QR kód, zobraz tlačidlo
+                st.markdown(f"""
+                <div style="text-align: center; margin: 2rem 0;">
+                    <p>QR kód sa nepodarilo načítať. Použite priamy odkaz:</p>
+                    <a href="{evaluator_url}" target="_blank" style="
+                        display: inline-block;
+                        padding: 1rem 2rem;
+                        background-color: #3b82f6;
+                        color: white;
+                        text-decoration: none;
+                        border-radius: 8px;
+                        font-weight: 600;
+                        font-size: 1.125rem;
+                        margin: 1rem 0;
+                    ">Prejsť na hodnotenie</a>
+                </div>
+                """, unsafe_allow_html=True)
+    
+    # Inštrukcie pre používateľov
+    st.markdown("""
+    <div style="text-align: center; margin-top: 2rem; color: #6b7280;">
+        <p><strong>Ako hodnotiť:</strong></p>
+        <p>1. Naskenujte QR kód fotoaparátom telefónu</p>
+        <p>2. Otvorte odkaz v prehliadači</p>
+        <p>3. Vyberte TOP 3 vzorky</p>
+        <p>4. Odošlite hodnotenie</p>
+    </div>
+    """, unsafe_allow_html=True)
 
 def admin_login():
     """Login formulár pre admin"""
@@ -1065,18 +1098,33 @@ def admin_dashboard():
         with col1:
             st.markdown('<h2 class="section-title">QR kód pre hodnotiteľov</h2>', unsafe_allow_html=True)
             
-            # URL aplikácie
+            # URL aplikácie - OPRAVENÉ pre mobile
             app_url = "https://consumervote.streamlit.app"
-            landing_url = f"{app_url}?mode=landing&hide_sidebar=true"
+            landing_url = f"{app_url}/?mode=landing"  # Jednoduchšia URL
             
-            # QR kód
-            qr_image_url = generate_qr_code_url(landing_url, size="300x300", error_correction="H")
+            # QR kód - použijeme Google Charts pre najlepšiu kompatibilitu
+            qr_image_url = f"https://chart.googleapis.com/chart?chs=300x300&cht=qr&chl={urllib.parse.quote(landing_url)}&choe=UTF-8"
             
             col_qr1, col_qr2, col_qr3 = st.columns([1, 2, 1])
             with col_qr2:
                 st.markdown('<div class="professional-card">', unsafe_allow_html=True)
-                st.image(qr_image_url, width=300)
+                try:
+                    st.image(qr_image_url, width=300, caption="QR kód pre hodnotenie")
+                except Exception as e:
+                    st.error(f"QR kód sa nepodarilo načítať: {e}")
+                    # Fallback QR service
+                    fallback_qr = f"https://api.qrserver.com/v1/create-qr-code/?size=300x300&data={urllib.parse.quote(landing_url)}"
+                    try:
+                        st.image(fallback_qr, width=300)
+                    except:
+                        st.warning("QR kód nedostupný")
                 st.markdown('</div>', unsafe_allow_html=True)
+            
+            # Debug informácie pre admin
+            with st.expander("URL pre QR kód"):
+                st.code(landing_url)
+                st.write("**QR kód URL:**")
+                st.code(qr_image_url)
             
             # Akčné tlačidlá
             col_btn1, col_btn2 = st.columns(2)
@@ -1098,7 +1146,7 @@ def admin_dashboard():
                 """, unsafe_allow_html=True)
             
             with col_btn2:
-                evaluator_url = f"{app_url}?mode=evaluator&hide_sidebar=true"
+                evaluator_url = f"{app_url}/?mode=evaluator"  # Jednoduchšia URL
                 st.markdown(f"""
                 <a href="{evaluator_url}" target="_blank" style="
                     display: inline-block;
@@ -1289,6 +1337,34 @@ def evaluator_interface():
     # Aplikuj profesionálne CSS
     st.markdown(get_professional_css(), unsafe_allow_html=True)
     
+    # Ak prichádzame z QR kódu (mode=evaluator), skryj sidebar úplne
+    query_params = {}
+    try:
+        if hasattr(st, 'query_params'):
+            if hasattr(st.query_params, 'to_dict'):
+                query_params = st.query_params.to_dict()
+            elif hasattr(st.query_params, 'items'):
+                query_params = dict(st.query_params.items())
+            else:
+                query_params = dict(st.query_params)
+        
+        if query_params.get('mode') == 'evaluator':
+            st.markdown("""
+            <style>
+            .stSidebar {
+                display: none !important;
+            }
+            .main > div {
+                padding-left: 1rem !important;
+                padding-right: 1rem !important;
+                max-width: 100% !important;
+            }
+            </style>
+            """, unsafe_allow_html=True)
+    except Exception as e:
+        # Ak sa query params nepodarí získať, pokračuj bez nich
+        pass
+    
     # Získanie aktuálneho stavu
     current_state = get_current_state()
     
@@ -1297,6 +1373,23 @@ def evaluator_interface():
     
     if not current_state['session_active']:
         st.error("Hodnotenie nie je aktívne. Kontaktujte administrátora.")
+        
+        # Pridaj tlačidlo späť na landing page pre mobile
+        app_url = "https://consumervote.streamlit.app"
+        landing_url = f"{app_url}/?mode=landing"
+        st.markdown(f"""
+        <div style="text-align: center; margin: 2rem 0;">
+            <a href="{landing_url}" style="
+                display: inline-block;
+                padding: 1rem 2rem;
+                background-color: #6b7280;
+                color: white;
+                text-decoration: none;
+                border-radius: 8px;
+                font-weight: 600;
+            ">Späť na úvodnú stránku</a>
+        </div>
+        """, unsafe_allow_html=True)
         return
     
     # Kontrola device limitu
@@ -1309,6 +1402,23 @@ def evaluator_interface():
         st.warning(f"Príliš skoré hodnotenie: {message}")
         if eval_count > 0:
             st.info(f"Z tohto zariadenia už bolo odoslaných {eval_count} hodnotení")
+        
+        # Pridaj tlačidlo späť na landing page
+        app_url = "https://consumervote.streamlit.app"
+        landing_url = f"{app_url}/?mode=landing"
+        st.markdown(f"""
+        <div style="text-align: center; margin: 2rem 0;">
+            <a href="{landing_url}" style="
+                display: inline-block;
+                padding: 1rem 2rem;
+                background-color: #6b7280;
+                color: white;
+                text-decoration: none;
+                border-radius: 8px;
+                font-weight: 600;
+            ">Späť na úvodnú stránku</a>
+        </div>
+        """, unsafe_allow_html=True)
         return
     
     # Progress indicator
@@ -1339,10 +1449,32 @@ def evaluator_interface():
         st.success("Ďakujeme za hodnotenie!")
         st.balloons()
         
-        if st.button("Nové hodnotenie", type="primary"):
-            st.session_state.evaluation_submitted = False
-            st.session_state.show_confirmation = False
-            st.rerun()
+        col1, col2 = st.columns(2)
+        with col1:
+            if st.button("Nové hodnotenie", type="primary", use_container_width=True):
+                st.session_state.evaluation_submitted = False
+                st.session_state.show_confirmation = False
+                st.rerun()
+        
+        with col2:
+            # Tlačidlo späť na landing page
+            app_url = "https://consumervote.streamlit.app"
+            landing_url = f"{app_url}/?mode=landing"
+            st.markdown(f"""
+            <a href="{landing_url}" target="_blank" style="
+                display: inline-block;
+                padding: 0.75rem 1.5rem;
+                background-color: #6b7280;
+                color: white;
+                text-decoration: none;
+                border-radius: 8px;
+                font-weight: 500;
+                text-align: center;
+                width: 100%;
+                box-sizing: border-box;
+                margin-top: 0.5rem;
+            ">Späť na úvodné</a>
+            """, unsafe_allow_html=True)
         
         return
     
@@ -1486,26 +1618,51 @@ def main():
     # Inicializácia databázy
     init_database()
     
+    # Získanie query parametrov s lepším error handlingom
+    query_params = {}
     try:
-        query_params = st.query_params
-    except:
+        # Skús rôzne spôsoby získania query parametrov
+        if hasattr(st, 'query_params'):
+            if hasattr(st.query_params, 'to_dict'):
+                query_params = st.query_params.to_dict()
+            elif hasattr(st.query_params, 'items'):
+                query_params = dict(st.query_params.items())
+            else:
+                query_params = dict(st.query_params)
+    except Exception as e:
+        st.sidebar.error(f"Chyba pri získavaní query parametrov: {e}")
         query_params = {}
     
+    # Debug query parametrov
+    if query_params:
+        st.sidebar.write("**Debug - Query params:**")
+        st.sidebar.json(query_params)
+    
+    # Kontrola módu z URL
     hide_sidebar = False
     force_evaluator = False
     force_landing = False
     
+    # Spracovanie query parametrov
+    mode = query_params.get('mode', '').lower() if 'mode' in query_params else ''
+    hide_sidebar_param = query_params.get('hide_sidebar', '').lower() if 'hide_sidebar' in query_params else ''
+    
+    if hide_sidebar_param == 'true':
+        hide_sidebar = True
+    
+    if mode == 'evaluator':
+        force_evaluator = True
+        st.session_state.admin_mode = False
+    elif mode == 'landing':
+        force_landing = True
+        st.session_state.admin_mode = False
+    
+    # Debug informácie
     if query_params:
-        if 'hide_sidebar' in query_params:
-            hide_sidebar = str(query_params.get('hide_sidebar', '')).lower() == 'true'
-        if 'mode' in query_params:
-            mode = str(query_params.get('mode', '')).lower()
-            if mode == 'evaluator':
-                force_evaluator = True
-                st.session_state.admin_mode = False
-            elif mode == 'landing':
-                force_landing = True
-                st.session_state.admin_mode = False
+        st.sidebar.write(f"**Mode:** {mode}")
+        st.sidebar.write(f"**Force evaluator:** {force_evaluator}")
+        st.sidebar.write(f"**Force landing:** {force_landing}")
+        st.sidebar.write(f"**Hide sidebar:** {hide_sidebar}")
     
     # Ak je force landing mode, zobraz landing page
     if force_landing:
@@ -1513,8 +1670,23 @@ def main():
         return
     
     # Ak je evaluator mode alebo hide_sidebar, zobraz evaluator
-    if hide_sidebar or force_evaluator:
+    if force_evaluator or hide_sidebar:
         st.session_state.admin_mode = False
+        
+        # Skryť sidebar pre mobile verziu
+        if hide_sidebar:
+            st.markdown("""
+            <style>
+            .stSidebar {
+                display: none;
+            }
+            .main > div {
+                padding-left: 1rem !important;
+                padding-right: 1rem !important;
+            }
+            </style>
+            """, unsafe_allow_html=True)
+        
         evaluator_interface()
         return
     
@@ -1533,6 +1705,14 @@ def main():
     with st.sidebar:
         st.title("Hodnotenie vzoriek")
         
+        # Debug informácie
+        if query_params:
+            with st.expander("Debug Query Params"):
+                st.json(query_params)
+                st.write(f"Mode: {mode}")
+                st.write(f"Force evaluator: {force_evaluator}")
+                st.write(f"Hide sidebar: {hide_sidebar}")
+        
         # Zobrazenie aktuálnej session
         if current_state['session_active']:
             st.success(f"**{current_state['session_name']}**")
@@ -1545,13 +1725,25 @@ def main():
         else:
             st.info("Admin neprihlásený")
         
-        mode = st.radio(
+        mode_selection = st.radio(
             "Vyberte režim:",
             ["Admin Dashboard", "Hodnotiteľ"],
             index=0 if st.session_state.admin_mode else 1
         )
         
-        st.session_state.admin_mode = (mode == "Admin Dashboard")
+        st.session_state.admin_mode = (mode_selection == "Admin Dashboard")
+        
+        # Rýchle odkazy pre testovanie
+        st.markdown("**Rýchle odkazy:**")
+        app_url = "https://consumervote.streamlit.app"
+        
+        # Landing page link
+        landing_url = f"{app_url}/?mode=landing"
+        st.markdown(f'<a href="{landing_url}" target="_blank">Landing Page</a>', unsafe_allow_html=True)
+        
+        # Evaluator link  
+        evaluator_url = f"{app_url}/?mode=evaluator"
+        st.markdown(f'<a href="{evaluator_url}" target="_blank">Evaluator</a>', unsafe_allow_html=True)
         
         if st.session_state.admin_authenticated and st.button("Rýchle odhlásenie", use_container_width=True):
             destroy_admin_session(st.session_state.admin_session_token)
